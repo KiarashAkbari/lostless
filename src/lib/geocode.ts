@@ -1,4 +1,4 @@
-import { CONFIG } from '../config';
+import { CONFIG, svcUrl } from '../config';
 import type { Place } from '../types';
 
 /**
@@ -30,7 +30,7 @@ export async function searchPlaces(query: string): Promise<Place[]> {
   const q = query.trim();
   if (!q) return [];
   const url =
-    `${CONFIG.nominatim.baseUrl}/search?format=jsonv2` +
+    `${svcUrl(CONFIG.nominatim.baseUrl)}/search?format=jsonv2` +
     `&limit=${CONFIG.nominatim.searchLimit}&q=${encodeURIComponent(q)}`;
   const res = await throttledFetch(url);
   if (!res.ok) throw new Error(`search failed (HTTP ${res.status})`);
@@ -55,7 +55,7 @@ export async function searchPlaces(query: string): Promise<Place[]> {
 export async function reverseGeocode(lat: number, lon: number): Promise<string> {
   try {
     const url =
-      `${CONFIG.nominatim.baseUrl}/reverse?format=jsonv2` +
+      `${svcUrl(CONFIG.nominatim.baseUrl)}/reverse?format=jsonv2` +
       `&lat=${lat}&lon=${lon}&zoom=17`;
     const res = await throttledFetch(url);
     if (!res.ok) throw new Error(`reverse failed (HTTP ${res.status})`);

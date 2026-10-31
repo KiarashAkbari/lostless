@@ -11,7 +11,7 @@ import { StepsList } from './components/StepsList';
 import { NavOverlay } from './components/NavOverlay';
 import { MapButtons } from './components/MapButtons';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import type { MapApi, MapStatus } from './components/MapView';
+import type { MapApi, MapRenderer, MapStatus } from './components/MapView';
 import { searchPlaces, reverseGeocode } from './lib/geocode';
 import { getRoute } from './lib/routing';
 import { nearestOnPolyline, formatCoord } from './lib/geo';
@@ -53,6 +53,8 @@ export default function App() {
   const [remainingCoords, setRemainingCoords] = useState<[number, number][] | null>(null);
   const [online, setOnline] = useState<boolean>(navigator.onLine);
   const [mapStatus, setMapStatus] = useState<MapStatus>('loading');
+  const [mapRenderer, setMapRenderer] = useState<MapRenderer>('gl');
+  const [forceRaster, setForceRaster] = useState(false);
   const [mapKey, setMapKey] = useState(0); // bump to re-mount the map (retry)
 
   // refs for use inside callbacks/effects without re-subscribing
@@ -75,10 +77,10 @@ export default function App() {
   }, []);
 
   const pushBanner = useCallback(
-    (kind: Banner['kind'], msg: string, opts?: { tag?: string; sticky?: boolean; action?: { label: string; onClick: () => void } }) => {
+    (kind: Banner['kind'], msg: string, opts?: { tag?: string; sticky?: boolean; action?: Banner['action']; action2?: Banner['action2'] }) => {
       const id = ++bannerSeq;
-      if (opts?.tag) setBanners((b) => [...b.filter((x) => x.tag !== opts.tag), { id, kind, msg, tag: opts.tag, action: opts?.action }]);
-      else setBanners((b) => [...b, { id, kind, msg, action: opts?.action }]);
+      if (opts?.tag) setBanners((b) => [...b.filter((x) => x.tag !== opts.tag), { id, kind, msg, tag: opts.tag, action: opts?.action, action2: opts?.action2 }]);
+      else setBanners((b) => [...b, { id, kind, msg, action: opts?.action, action2: opts?.action2 }]);
       if (!opts?.sticky) setTimeout(() => dismissBanner(id), 6500);
     },
     [dismissBanner],
@@ -304,7 +306,8 @@ export default function App() {
   }, [pushBanner]);
 
   const onMapStatus = useCallback(
-    (s: MapStatus, msg?: string) => {
+    (s: MapStatus, msg?: string, renderer?: MapRenderer) => {
+      if (renderer) setMapRenderer(renderer);
       setMapStatus(s);
       if (s === 'error') {
         pushBanner('error', `MAP FAILED TO LOAD (${msg ?? 'unknown'}) — CHECK CONNECTION / WEBGL`, {
@@ -313,6 +316,14 @@ export default function App() {
           action: {
             label: 'RETRY',
             onClick: () => {
+              setMapStatus('loading');
+              setMapKey((k) => k + 1);
+            },
+          },
+          action2: {
+            label: 'USE RASTER MAP',
+            onClick: () => {
+              setForceRaster(true);
               setMapStatus('loading');
               setMapKey((k) => k + 1);
             },
@@ -439,6 +450,7 @@ export default function App() {
               remainingCoords={navigating ? remainingCoords : null}
               navigating={navigating}
               follow={follow}
+              forceRaster={forceRaster}
               onMapTap={onMapTap}
               onMapReady={(api) => {
                 mapApi.current = api;
@@ -466,6 +478,11 @@ export default function App() {
                   {b.action.label}
                 </button>
               )}
+              {b.action2 && (
+                <button className="mini-btn mono" onClick={b.action2.onClick}>
+                  {b.action2.label}
+                </button>
+              )}
               <button className="icon-btn mono b-x" onClick={() => dismissBanner(b.id)} aria-label="dismiss">
                 ×
               </button>
@@ -482,11 +499,9 @@ export default function App() {
           />
         )}
 
-        {mapStatus !== 'ready' && (
-          <div className={`map-status mono${mapStatus === 'error' ? ' err' : ''}`}>
-            MAP ▸ {mapStatus === 'loading' ? 'LOADING…' : 'ERROR — SEE BANNER'}
-          </div>
-        )}
+        <div className={`map-status mono${mapStatus === 'error' ? ' err' : ''}`}>
+          MAP ▸ {mapStatus === 'ready' ? (mapRenderer === 'raster' ? 'RASTER' : 'GL') : mapStatus === 'loading' ? 'LOADING…' : 'ERROR — SEE BANNER'}
+        </div>
 
         <MapButtons
           follow={follow}

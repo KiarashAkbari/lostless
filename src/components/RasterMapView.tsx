@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { CONFIG } from '../config';
+import { CONFIG, svcUrl } from '../config';
 import type { MapViewProps } from './MapView';
 
 /**
@@ -32,7 +32,7 @@ export function RasterMapView(props: MapViewProps) {
   // init
   useEffect(() => {
     if (!containerRef.current) return;
-    onStatusRef.current?.('loading');
+    onStatusRef.current?.('loading', undefined, 'raster');
     let map: L.Map;
     try {
       map = L.map(containerRef.current, {
@@ -43,17 +43,21 @@ export function RasterMapView(props: MapViewProps) {
         minZoom: 3,
       });
     } catch (err) {
-      onStatusRef.current?.('error', err instanceof Error ? err.message : 'map init failed');
+      onStatusRef.current?.('error', err instanceof Error ? err.message : 'map init failed', 'raster');
       return;
     }
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    // in the Arena preview, tiles go through the same-origin proxy as well
+    L.tileLayer(svcUrl(CONFIG.map.osmRasterUrl), {
       maxZoom: 19,
       attribution:
         '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a>',
     }).addTo(map);
     map.on('click', (e: L.LeafletMouseEvent) => onTapRef.current([e.latlng.lng, e.latlng.lat]));
-    map.on('load', () => onStatusRef.current?.('ready'));
-    const t = setTimeout(() => onStatusRef.current?.('ready'), 1500);
+    map.on('load', () => onStatusRef.current?.('ready', undefined, 'raster'));
+    const t = setTimeout(() => onStatusRef.current?.('ready', undefined, 'raster'), 1500);
+    // keep tile layout correct when the container resizes (sheet drags, rotation)
+    const onResize = () => map.invalidateSize();
+    window.addEventListener('resize', onResize);
     mapRef.current = map;
     props.onMapReady?.({
       getCenter: () => {
@@ -66,6 +70,7 @@ export function RasterMapView(props: MapViewProps) {
     });
     return () => {
       clearTimeout(t);
+      window.removeEventListener('resize', onResize);
       map.remove();
       mapRef.current = null;
     };
