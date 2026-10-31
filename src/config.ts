@@ -46,6 +46,8 @@ export const CONFIG = {
 
     valhalla: {
       baseUrl: 'https://valhalla1.openstreetmap.de',
+      /** tried automatically if the primary host is unreachable */
+      fallbackBaseUrl: 'https://valhalla2.openstreetmap.de',
       costing: { car: 'auto', walk: 'pedestrian', bike: 'bicycle' } as Record<TravelMode, string>,
     },
 
@@ -55,6 +57,8 @@ export const CONFIG = {
     },
 
     timeoutMs: 15000,
+    /** FOSSGIS rate limit is 1 call/user/sec — throttle client-side too */
+    minIntervalMs: 1100,
   },
 
   /** re-route automatically when we drift this far from the route line */

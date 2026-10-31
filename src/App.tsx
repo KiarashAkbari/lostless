@@ -1,9 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import { CONFIG, type TravelMode } from './config';
 import type { Banner, Place, RouteResult, SheetSnap } from './types';
 import { useGeolocation } from './hooks/useGeolocation';
 import { useTheme } from './hooks/useTheme';
-import { MapView, type MapApi } from './components/MapView';
 import { Sheet } from './components/Sheet';
 import { TopBar } from './components/TopBar';
 import { SearchBox } from './components/SearchBox';
@@ -11,11 +10,16 @@ import { RoutePanel } from './components/RoutePanel';
 import { StepsList } from './components/StepsList';
 import { NavOverlay } from './components/NavOverlay';
 import { MapButtons } from './components/MapButtons';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import type { MapApi, MapStatus } from './components/MapView';
 import { searchPlaces, reverseGeocode } from './lib/geocode';
 import { getRoute } from './lib/routing';
 import { nearestOnPolyline, formatCoord } from './lib/geo';
 import { getFavorites, isFavorite, addFavorite, removeFavorite } from './lib/storage';
 import { acquireWakeLock, releaseWakeLock, reacquireOnVisible, wakeLockSupported } from './lib/wakelock';
+
+// MapLibre (~1.2 MB) loads in its own chunk, after the UI is already interactive
+const MapView = lazy(() => import('./components/MapView').then((m) => ({ default: m.MapView })));
 
 type RouteStatus = 'idle' | 'loading' | 'ok' | 'error';
 type SearchStatus = 'idle' | 'loading' | 'error';
@@ -48,6 +52,8 @@ export default function App() {
   const [nav, setNav] = useState<NavState | null>(null);
   const [remainingCoords, setRemainingCoords] = useState<[number, number][] | null>(null);
   const [online, setOnline] = useState<boolean>(navigator.onLine);
+  const [mapStatus, setMapStatus] = useState<MapStatus>('loading');
+  const [mapKey, setMapKey] = useState(0); // bump to re-mount the map (retry)
 
   // refs for use inside callbacks/effects without re-subscribing
   const mapApi = useRef<MapApi | null>(null);
@@ -114,8 +120,14 @@ export default function App() {
       });
     } else if (geo.status === 'unsupported') {
       pushBanner('error', 'GEOLOCATION NOT SUPPORTED BY THIS BROWSER — ROUTES START FROM MAP CENTER', { tag: 'gps', sticky: true });
+    } else if (geo.status === 'locating') {
+      // no fix yet — after a while, tell the user what might be wrong
+      const t = setTimeout(() => {
+        pushBanner('info', 'GPS STILL SEARCHING… — TURN ON LOCATION (HIGH ACCURACY) AND TRY OUTDOORS', { tag: 'gps-slow' });
+      }, 10000);
+      return () => clearTimeout(t);
     } else {
-      setBanners((b) => b.filter((x) => x.tag !== 'gps'));
+      setBanners((b) => b.filter((x) => x.tag !== 'gps' && x.tag !== 'gps-slow'));
     }
   }, [geo.status, geo.retry, pushBanner]);
 
@@ -156,10 +168,14 @@ export default function App() {
     if (destination) void fetchRoute(destination, mode);
   }, [destination, mode, fetchRoute]);
 
-  // if a destination was picked before GPS locked, redo the route from the real position
+  // when GPS first locks: fly to the user, and redo the route from the real position
   useEffect(() => {
-    if (geo.status === 'ok' && !wasGpsOk.current && destRef.current && !navigatingRef.current) {
-      void fetchRoute(destRef.current, modeRef.current);
+    if (geo.status === 'ok' && !wasGpsOk.current) {
+      if (posRef.current) {
+        const { longitude, latitude } = posRef.current.coords;
+        if (!navigatingRef.current) mapApi.current?.centerOn([longitude, latitude], 15.5);
+      }
+      if (destRef.current && !navigatingRef.current) void fetchRoute(destRef.current, modeRef.current);
     }
     wasGpsOk.current = geo.status === 'ok';
   }, [geo.status, fetchRoute]);
@@ -190,11 +206,14 @@ export default function App() {
   }, []);
 
   // ── map tap → drop pin ─────────────────────────────────────────────────────
-  const onMapTap = useCallback(async (ll: [number, number]) => {
-    setSnap('peek');
-    const name = await reverseGeocode(ll[1], ll[0]);
-    pickPlace({ id: `pin:${ll[1].toFixed(6)},${ll[0].toFixed(6)}`, name, lat: ll[1], lon: ll[0], kind: 'pin' });
-  }, [pickPlace]);
+  const onMapTap = useCallback(
+    async (ll: [number, number]) => {
+      setSnap('peek');
+      const name = await reverseGeocode(ll[1], ll[0]);
+      pickPlace({ id: `pin:${ll[1].toFixed(6)},${ll[0].toFixed(6)}`, name, lat: ll[1], lon: ll[0], kind: 'pin' });
+    },
+    [pickPlace],
+  );
 
   // ── navigation ─────────────────────────────────────────────────────────────
   const startNav = useCallback(() => {
@@ -221,7 +240,7 @@ export default function App() {
     if (!navigating) return;
     let removeListener = () => {};
     void acquireWakeLock().then((ok) => {
-      if (!ok && wakeLockSupported() === false) {
+      if (!ok && !wakeLockSupported()) {
         pushBanner('info', 'SCREEN WAKE LOCK NOT SUPPORTED HERE — THE SCREEN MAY SLEEP WHILE NAVIGATING');
       }
       removeListener = reacquireOnVisible();
@@ -247,7 +266,7 @@ export default function App() {
       idx = i;
       if (acc >= near.arclengthM) break;
     }
-    const stepEnd = route.steps.slice(0, idx + 1).reduce((s, x) => s + x.distanceM, 0);
+    const stepEnd = route.steps.slice(0, idx + 1).reduce((s, x) => s + (x.distanceM || 0), 0);
     const remainingM = Math.max(0, route.distanceM - near.arclengthM);
     setNav({
       stepIndex: idx,
@@ -280,8 +299,31 @@ export default function App() {
       setFollow(true);
     } else {
       setFollow((f) => !f);
+      pushBanner('info', 'NO GPS FIX YET — CENTERED ON MAP VIEW', { tag: 'recenter' });
     }
-  }, []);
+  }, [pushBanner]);
+
+  const onMapStatus = useCallback(
+    (s: MapStatus, msg?: string) => {
+      setMapStatus(s);
+      if (s === 'error') {
+        pushBanner('error', `MAP FAILED TO LOAD (${msg ?? 'unknown'}) — CHECK CONNECTION / WEBGL`, {
+          tag: 'map',
+          sticky: true,
+          action: {
+            label: 'RETRY',
+            onClick: () => {
+              setMapStatus('loading');
+              setMapKey((k) => k + 1);
+            },
+          },
+        });
+      } else {
+        setBanners((b) => b.filter((x) => x.tag !== 'map'));
+      }
+    },
+    [pushBanner],
+  );
 
   // ── render ─────────────────────────────────────────────────────────────────
   const shortName = (name: string) => name.split(',')[0];
@@ -289,25 +331,10 @@ export default function App() {
   const peekContent = (
     <>
       <SearchBox value={query} onChange={setQuery} onSubmit={onSearch} loading={searchStatus === 'loading'} />
-      {destination && route ? (
+      {destination ? (
         <RoutePanel
           destination={destination}
           route={route}
-          routeStatus={routeStatus}
-          mode={mode}
-          onMode={setMode}
-          navigating={navigating}
-          onStart={startNav}
-          onStop={stopNav}
-          onClear={clearDestination}
-          onRetry={() => void fetchRoute(destination, mode)}
-          isFav={isFavorite(destination.id)}
-          onToggleFav={() => toggleFav(destination)}
-        />
-      ) : destination ? (
-        <RoutePanel
-          destination={destination}
-          route={null}
           routeStatus={routeStatus === 'idle' ? 'loading' : routeStatus}
           mode={mode}
           onMode={setMode}
@@ -374,14 +401,16 @@ export default function App() {
                       <span className="r-name">{f.name}</span>
                       <span className="r-kind mono">{formatCoord(f.lat, f.lon)}</span>
                     </button>
-                    <button className="icon-btn mono" onClick={() => setFavorites(removeFavorite(f.id))} aria-label={`remove ${shortName(f.name)}`}>×</button>
+                    <button className="icon-btn mono" onClick={() => setFavorites(removeFavorite(f.id))} aria-label={`remove ${shortName(f.name)}`}>
+                      ×
+                    </button>
                   </li>
                 ))}
               </ul>
             </>
           )}
           <div className="body-label mono dim footer-note">
-            MAP DATA © OPENSTREETMAP CONTRIBUTORS · TILES OPENFREEMAP · ROUTING VALHALLA/OSRM — ALL FREE PUBLIC SERVICES
+            MAP DATA © OPENSTREETMAP CONTRIBUTORS · TILES OPENFREEMAP (FALLBACK: OSM RASTER) · ROUTING VALHALLA/OSRM — ALL FREE PUBLIC SERVICES
           </div>
         </>
       )}
@@ -391,19 +420,33 @@ export default function App() {
   return (
     <div className="app">
       <div className="map-wrap">
-        <MapView
-          theme={theme}
-          pos={geo.pos}
-          destination={destination}
-          route={route}
-          remainingCoords={navigating ? remainingCoords : null}
-          navigating={navigating}
-          follow={follow}
-          onMapTap={onMapTap}
-          onMapReady={(api) => {
-            mapApi.current = api;
-          }}
-        />
+        <ErrorBoundary>
+          <Suspense
+            fallback={
+              <div className="map-container map-loading">
+                <span className="mono">
+                  LOADING MAP<span className="dots">…</span>
+                </span>
+              </div>
+            }
+          >
+            <MapView
+              key={mapKey}
+              theme={theme}
+              pos={geo.pos}
+              destination={destination}
+              route={route}
+              remainingCoords={navigating ? remainingCoords : null}
+              navigating={navigating}
+              follow={follow}
+              onMapTap={onMapTap}
+              onMapReady={(api) => {
+                mapApi.current = api;
+              }}
+              onStatus={onMapStatus}
+            />
+          </Suspense>
+        </ErrorBoundary>
 
         <TopBar
           theme={theme}
@@ -423,7 +466,9 @@ export default function App() {
                   {b.action.label}
                 </button>
               )}
-              <button className="icon-btn mono b-x" onClick={() => dismissBanner(b.id)} aria-label="dismiss">×</button>
+              <button className="icon-btn mono b-x" onClick={() => dismissBanner(b.id)} aria-label="dismiss">
+                ×
+              </button>
             </div>
           ))}
         </div>
@@ -437,6 +482,12 @@ export default function App() {
           />
         )}
 
+        {mapStatus !== 'ready' && (
+          <div className={`map-status mono${mapStatus === 'error' ? ' err' : ''}`}>
+            MAP ▸ {mapStatus === 'loading' ? 'LOADING…' : 'ERROR — SEE BANNER'}
+          </div>
+        )}
+
         <MapButtons
           follow={follow}
           navigating={navigating}
@@ -445,14 +496,14 @@ export default function App() {
           onRecenter={recenter}
         />
 
-        <Sheet snap={snap} onSnap={setSnap} peek={peekContent} body={bodyContent} />
-
         {snap === 'hidden' && (
           <button className="fab mono" onClick={() => setSnap('peek')}>
             + SEARCH
           </button>
         )}
       </div>
+
+      <Sheet snap={snap} onSnap={setSnap} peek={peekContent} body={bodyContent} />
     </div>
   );
 }

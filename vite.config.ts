@@ -32,6 +32,15 @@ export default defineConfig({
             },
           },
           {
+            // OSM raster tiles (only used by the no-WebGL2 Leaflet fallback)
+            urlPattern: /^https:\/\/tile\.openstreetmap\.org\/.*/i,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'lostless-osm-raster',
+              expiration: { maxEntries: 400, maxAgeSeconds: 60 * 60 * 24 * 14 },
+            },
+          },
+          {
             // Nominatim geocoding: always try network first (results change)
             urlPattern: /^https:\/\/nominatim\.openstreetmap\.org\/.*/i,
             handler: 'NetworkFirst',
