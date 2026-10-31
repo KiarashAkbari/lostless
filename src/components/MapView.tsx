@@ -155,10 +155,14 @@ function GlMapView(props: MapViewProps) {
       syncDynamic();
     });
     map.on('error', (e) => {
-      // surface real map failures (style/tiles/WebGL) instead of a silent blank map
-      if (errorCountRef.current++ < 3) {
-        const msg = (e as { error?: { message?: string } }).error?.message ?? 'map error';
+      const msg = (e as { error?: { message?: string } }).error?.message ?? 'map error';
+      // Pre-load failures (style / WebGL / context loss) mean a blank map -> surface them.
+      // After load, single tile/image hiccups are transient and the map still renders -> ignore.
+      const fatal = !styleLoadedRef.current || /webgl|context|style/i.test(msg);
+      if (fatal && errorCountRef.current++ < 3) {
         onStatusRef.current?.('error', msg);
+      } else if (!fatal) {
+        console.warn('[lostless] transient map tile error (ignored):', msg);
       }
     });
 
