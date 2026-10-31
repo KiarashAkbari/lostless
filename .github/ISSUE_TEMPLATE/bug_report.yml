@@ -1,0 +1,29 @@
+name: Bug report
+title: "bug: "
+labels: [bug]
+description: Something in lostless doesn't work. Please include what you expected vs. what happened.
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      placeholder: Steps to reproduce, what you saw, what you expected…
+    validations:
+      required: true
+  - type: textarea
+    id: where
+    attributes:
+      label: Where did it happen? (page / screen / device / browser)
+      placeholder: e.g. Android Chrome 130, Pixel 8, on the map screen while navigating
+  - type: textarea
+    id: logs
+    attributes:
+      label: Console errors or screenshots (optional)
+      render: shell
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Please confirm
+      options:
+        - label: I was online (HTTPS) when this happened
+        - label: Location permission was granted

@@ -28,9 +28,13 @@ For testing on a real phone against your computer, use e.g. `npm run dev -- --ho
 open `https://<your-lan-ip>:5173` (needs a cert) — or just deploy (see below) and test there.
 
 ```bash
-npm run build      # production build into dist/
+npm test           # unit tests (geo math, maneuver glyphs, config integrity)
+npm run build      # production build into dist/ (also type-checks)
 npm run preview    # serve dist/ locally
 ```
+
+CI runs `npm ci && npm test && npm run build` on every pull request and push to
+`main` (`.github/workflows/ci.yml`) — a red check means don't merge.
 
 ## Deploy for free
 
@@ -46,6 +50,12 @@ builds the app and publishes `dist/` to GitHub Pages automatically.
 
 No secrets, no keys. The build uses `base: './'`, so it works under the `/lostless/`
 sub-path automatically.
+
+> ⚠️ **Free-plan caveat:** on GitHub Free, Pages can only publish from **public**
+> repositories (private repos need Pro/Team/Enterprise). This repo is currently
+> **private** — so either make the repo public (fine for an open-source toy), or use
+> Option B (Vercel), which happily builds private repos on the free hobby plan.
+> The published Pages site is always public, even from a paid private repo.
 
 ### Option B — Vercel (also free)
 
@@ -105,6 +115,20 @@ To run your own routing server later: host Valhalla or OSRM, change one URL in
 **Privacy note:** search, reverse-geocoding and routing requests go to those public
 servers (your approximate location is visible to them). Favorites never leave the device
 (localStorage). If that bothers you, self-host all three services.
+
+### Self-hosting toolbox (all open source, found on GitHub)
+
+| Job | Repo | Notes |
+|---|---|---|
+| Map tiles + styles | [hyperknot/openfreemap](https://github.com/hyperknot/openfreemap) | one-command self-host of OpenFreeMap tiles/styles |
+| Tile server (generic) | [maptiler/tileserver-gl](https://github.com/maptiler/tileserver-gl) | serves MBTiles/GeoJSON + styles, works with MapLibre |
+| Styles for self-hosting | [teamapps-org/maplibre-gl-styles](https://github.com/teamapps-org/maplibre-gl-styles) | MapLibre style collection incl. dark styles |
+| Routing | [valhalla/valhalla](https://github.com/valhalla/valhalla) (+ [nilsnolde/docker-valhalla](https://github.com/nilsnolde/docker-valhalla)) | all modes; point `config.routing.valhalla.baseUrl` at it |
+| Routing (alt) | [Project-OSRM/osrm-backend](https://github.com/Project-OSRM/osrm-backend) | set `routing.engine: 'osrm'` + your URL |
+| Search | [osm-search/Nominatim](https://github.com/osm-search/Nominatim) (+ [mediagis/nominatim-docker](https://github.com/mediagis/nominatim-docker)) | set `config.nominatim.baseUrl` |
+| Search (lighter alt) | [komoot/photon](https://github.com/komoot/photon) (+ docker images) | Elasticsearch-based, fast autocomplete |
+
+OSM planet extracts for all of the above: [download.geofabrik.de](https://download.geofabrik.de).
 
 ## Stack
 
