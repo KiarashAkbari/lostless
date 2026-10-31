@@ -111,8 +111,11 @@ function GlMapView(props: MapViewProps) {
     }
     const full = route?.coords?.length ? lineFeature(route.coords) : emptyLine;
     const rest = navigating && remaining?.length ? lineFeature(remaining) : emptyLine;
-    (map.getSource('route-full') as maplibregl.GeoJSONSource).setData(full);
-    (map.getSource('route-rest') as maplibregl.GeoJSONSource).setData(rest);
+    const srcFull = map.getSource('route-full') as maplibregl.GeoJSONSource | undefined;
+    const srcRest = map.getSource('route-rest') as maplibregl.GeoJSONSource | undefined;
+    if (!srcFull || !srcRest) return; // style not ready yet — style.load will re-sync
+    srcFull.setData(full);
+    srcRest.setData(rest);
     if (map.getLayer('route-full-line')) {
       map.setPaintProperty('route-full-line', 'line-color', navigating ? routeColor : accent);
     }

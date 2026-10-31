@@ -6,9 +6,14 @@
  */
 import { describe, it, expect, vi, beforeAll, afterEach } from 'vitest';
 import { cleanup, fireEvent, render, screen, act, waitFor } from '@testing-library/react';
+import { CONFIG } from './config';
+
+// no artificial 1 req/s delays in tests
+const find = (re: RegExp) => screen.findByText(re, {}, { timeout: 8000 });
 
 // ── mock maplibre-gl (jsdom has no WebGL) ────────────────────────────────────
 const glHandlers: Record<string, Array<(...a: unknown[]) => void>> = {};
+const glSources: Record<string, { setData: (d: unknown) => void }> = {};
 const glMap = {
   on: vi.fn((type: string, fn: (...a: unknown[]) => void) => {
     (glHandlers[type] ??= []).push(fn);
@@ -17,8 +22,10 @@ const glMap = {
   remove: vi.fn(),
   getCenter: () => ({ lng: 8.6821, lat: 50.1109 }),
   isStyleLoaded: () => true,
-  getSource: () => undefined,
-  addSource: vi.fn(),
+  getSource: vi.fn((id: string) => glSources[id]),
+  addSource: vi.fn((id: string) => {
+    glSources[id] = { setData: vi.fn() };
+  }),
   addLayer: vi.fn(),
   getLayer: () => undefined,
   setPaintProperty: vi.fn(),
@@ -36,7 +43,9 @@ function FakeMap(this: unknown) {
 vi.mock('maplibre-gl', () => ({
   default: {
     Map: FakeMap,
-    Marker: vi.fn(() => ({ setLngLat: vi.fn().mockReturnThis(), addTo: vi.fn().mockReturnThis(), remove: vi.fn() })),
+    Marker: function FakeMarker(this: unknown) {
+      return { setLngLat: vi.fn().mockReturnThis(), addTo: vi.fn().mockReturnThis(), remove: vi.fn() };
+    },
     AttributionControl: vi.fn(),
     supported: () => true,
   },
@@ -91,6 +100,8 @@ const ok = (data: unknown) => ({ ok: true, status: 200, json: async () => data }
 // ── environment stubs ────────────────────────────────────────────────────────
 beforeAll(() => {
   (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
+  (CONFIG.nominatim as { minIntervalMs: number }).minIntervalMs = 0;
+  (CONFIG.routing as { minIntervalMs: number }).minIntervalMs = 0;
 
   window.matchMedia = ((q: string) => ({
     matches: false,
@@ -190,16 +201,16 @@ describe('App smoke test', () => {
     fireEvent.change(input, { target: { value: 'test plaza' } });
     fireEvent.submit(input.closest('form') as HTMLFormElement);
 
-    const result = await screen.findByText(/Test Plaza, Frankfurt/);
+    const result = await find(/Test Plaza, Frankfurt/);
     fireEvent.click(result);
 
     // route panel with stats + START appears after the (mocked) valhalla call
-    const start = await screen.findByText(/▶ START/);
+    const start = await find(/▶ START/);
     expect(screen.getByText(/DIST \/\//)).toBeTruthy();
     fireEvent.click(start);
-    expect(await screen.findByText(/■ STOP NAVIGATION/)).toBeTruthy();
+    expect(await find(/■ STOP NAVIGATION/)).toBeTruthy();
     // turn-by-turn list is in the sheet body
-    expect(await screen.findByText(/TURN-BY-TURN/)).toBeTruthy();
+    expect(await find(/TURN-BY-TURN/)).toBeTruthy();
   });
 
   it('tap on map → reverse geocode → pin → route', async () => {
@@ -207,8 +218,8 @@ describe('App smoke test', () => {
     render(<App />);
     await fireMapLoad();
     await fireMapTap(8.7, 50.12);
-    expect(await screen.findByText(/Tap Street 1/)).toBeTruthy();
-    expect(await screen.findByText(/▶ START/)).toBeTruthy();
+    expect(await find(/Tap Street 1/)).toBeTruthy();
+    expect(await find(/▶ START/)).toBeTruthy();
   });
 
   it('GPS denied shows a retry banner', async () => {
@@ -224,7 +235,7 @@ describe('App smoke test', () => {
     });
     const App = (await import('./App')).default;
     render(<App />);
-    expect(await screen.findByText(/GPS PERMISSION DENIED/)).toBeTruthy();
+    expect(await find(/GPS PERMISSION DENIED/)).toBeTruthy();
     expect(screen.getByText('RETRY')).toBeTruthy();
   });
 });
