@@ -5,8 +5,11 @@
   "type": "module",
   "description": "Personal navigation / map app. 100% free: MapLibre + OpenFreeMap tiles, Nominatim search, public Valhalla/OSRM routing.",
   "scripts": {
+    "predev": "node scripts/copy-maplibre-worker.mjs",
     "dev": "vite",
+    "prebuild": "node scripts/copy-maplibre-worker.mjs",
     "build": "tsc -b && vite build",
+    "prepreview": "node scripts/copy-maplibre-worker.mjs",
     "preview": "vite preview",
     "test": "vitest run"
   },

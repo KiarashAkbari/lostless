@@ -4,11 +4,34 @@ import { VitePWA } from 'vite-plugin-pwa';
 
 // base './' so the same build works on GitHub Pages (project site under /<repo>/)
 // and on Vercel (served at the domain root).
+
+// Same-origin proxy for the Arena live preview (*.e2b.app): in the preview
+// context, requests to third-party origins can be blocked (→ blank map), so
+// the app routes all external calls through /proxy/* (see src/config.ts
+// svcUrl). vite forwards them here — in BOTH dev and preview mode.
+// Targets can be overridden with LOSTLESS_PROXY_<NAME> env vars (local testing
+// / self-hosting). `process` is accessed via globalThis because @types/node is
+// not installed.
+const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env ?? {};
+const toUpstream = (name: string, fallback: string) => ({
+  target: env[`LOSTLESS_PROXY_${name}`] ?? fallback,
+  changeOrigin: true,
+  rewrite: (path: string) => path.replace(/^\/proxy\/[a-z0-9]+/i, ''),
+});
+const serviceProxy = {
+  '/proxy/ofm': toUpstream('OFM', 'https://tiles.openfreemap.org'),
+  '/proxy/nominatim': toUpstream('NOMINATIM', 'https://nominatim.openstreetmap.org'),
+  '/proxy/valhalla1': toUpstream('VALHALLA1', 'https://valhalla1.openstreetmap.de'),
+  '/proxy/valhalla2': toUpstream('VALHALLA2', 'https://valhalla2.openstreetmap.de'),
+  '/proxy/osrm': toUpstream('OSRM', 'https://router.project-osrm.org'),
+  '/proxy/osm': toUpstream('OSM', 'https://tile.openstreetmap.org'),
+};
+
 export default defineConfig({
   base: './',
   // the Arena live-preview proxies via a dynamic host (*.e2b.app) — allow it
-  server: { allowedHosts: true },
-  preview: { allowedHosts: true },
+  server: { allowedHosts: true, proxy: serviceProxy },
+  preview: { allowedHosts: true, proxy: serviceProxy },
   plugins: [
     react(),
     VitePWA({
@@ -29,6 +52,8 @@ export default defineConfig({
             options: {
               cacheName: 'lostless-map-tiles',
               expiration: { maxEntries: 800, maxAgeSeconds: 60 * 60 * 24 * 30 },
+              // never cache an error/opaque tile response for 30 days
+              cacheableResponse: { statuses: [200] },
             },
           },
           {
@@ -38,6 +63,8 @@ export default defineConfig({
             options: {
               cacheName: 'lostless-osm-raster',
               expiration: { maxEntries: 400, maxAgeSeconds: 60 * 60 * 24 * 14 },
+              // never cache an error/opaque tile response for 14 days
+              cacheableResponse: { statuses: [200] },
             },
           },
           {

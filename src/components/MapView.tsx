@@ -2,9 +2,17 @@ import { Suspense, lazy, useEffect, useMemo, useRef } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import type { Feature, LineString } from 'geojson';
-import { CONFIG } from '../config';
+import { CONFIG, previewProxied, svcUrl, rewriteStyleUrls } from '../config';
 import type { Place, RouteResult } from '../types';
 import type { Theme } from '../hooks/useTheme';
+
+// Load the MapLibre worker from a same-origin file instead of the default
+// inline blob worker, so the map also works where a CSP blocks blob: workers
+// (e.g. the Arena live preview). The file is copied to public/ at build time
+// (scripts/copy-maplibre-worker.mjs).
+if (typeof document !== 'undefined') {
+  maplibregl.config.WORKER_URL = new URL('maplibre-gl-csp-worker.js', document.baseURI).href;
+}
 
 export interface MapApi {
   getCenter: () => [number, number];
@@ -13,6 +21,7 @@ export interface MapApi {
 }
 
 export type MapStatus = 'loading' | 'ready' | 'error';
+export type MapRenderer = 'gl' | 'raster';
 
 export interface MapViewProps {
   theme: Theme;
@@ -23,11 +32,13 @@ export interface MapViewProps {
   remainingCoords: [number, number][] | null;
   navigating: boolean;
   follow: boolean;
+  /** force the Leaflet raster fallback even when WebGL2 is available */
+  forceRaster?: boolean;
   onMapTap: (lngLat: [number, number]) => void;
   /** lets the parent read the map center (fallback origin) and drive zoom/center */
   onMapReady?: (api: MapApi) => void;
   /** map lifecycle reporting so the UI can show loading / error states */
-  onStatus?: (s: MapStatus, msg?: string) => void;
+  onStatus?: (s: MapStatus, msg?: string, renderer?: MapRenderer) => void;
 }
 
 const RasterMapView = lazy(() => import('./RasterMapView').then((m) => ({ default: m.RasterMapView })));
@@ -53,9 +64,9 @@ function webgl2Supported(): boolean {
 }
 
 export function MapView(props: MapViewProps) {
-  // MapLibre v5 needs WebGL2; without it we render the raster fallback instead
+  // MapLibre v5 needs WebGL2; without it (or when forced) we render the raster fallback instead
   const supported = useMemo(() => webgl2Supported(), []);
-  if (!supported) {
+  if (!supported || props.forceRaster) {
     return (
       <Suspense fallback={<MapLoading />}>
         <RasterMapView {...props} />
@@ -66,6 +77,20 @@ export function MapView(props: MapViewProps) {
 }
 
 const styleFor = (theme: Theme) => (theme === 'dark' ? CONFIG.map.darkStyleUrl : CONFIG.map.lightStyleUrl);
+
+/**
+ * Resolve the style for a theme. Production: pass the URL through (cached by
+ * the service worker). Arena preview (*.e2b.app): fetch the style JSON through
+ * the same-origin proxy and rewrite every absolute URL inside it (sources,
+ * sprite, glyphs) to the proxy too, so nothing cross-origin is requested.
+ */
+async function resolveStyle(theme: Theme): Promise<string | maplibregl.StyleSpecification> {
+  const url = styleFor(theme);
+  if (!previewProxied()) return url;
+  const res = await fetch(svcUrl(url), { headers: { Accept: 'application/json' } });
+  if (!res.ok) throw new Error(`style HTTP ${res.status}`);
+  return rewriteStyleUrls((await res.json()) as maplibregl.StyleSpecification);
+}
 
 const OSM_ATTRIBUTION =
   '<a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap contributors</a>' +
@@ -123,91 +148,136 @@ function GlMapView(props: MapViewProps) {
 
   // init map once
   useEffect(() => {
-    if (!containerRef.current) return;
-    onStatusRef.current?.('loading');
-    let map: maplibregl.Map;
-    try {
-      map = new maplibregl.Map({
-        container: containerRef.current,
-        style: styleFor(dataRef.current.theme),
-        center: CONFIG.map.initialCenter,
-        zoom: CONFIG.map.initialZoom,
-        attributionControl: false,
-        maxPitch: 65,
-        dragRotate: false,
+    const container = containerRef.current;
+    if (!container) return;
+    let cancelled = false;
+    let map: maplibregl.Map | null = null;
+    onStatusRef.current?.('loading', undefined, 'gl');
+    // if the style never loads, the map area stays blank — surface it
+    const styleTimer = window.setTimeout(() => {
+      if (!styleLoadedRef.current) onStatusRef.current?.('error', 'map style did not load within 15s');
+    }, 15000);
+    // blank-map watchdog: style loaded but zero tiles rendered after 8s
+    let tileWatchdog = 0;
+    const contentTiles = { n: 0 };
+
+    void (async () => {
+      let style: string | maplibregl.StyleSpecification;
+      try {
+        style = await resolveStyle(dataRef.current.theme);
+      } catch (err) {
+        if (!cancelled) onStatusRef.current?.('error', err instanceof Error ? err.message : 'style fetch failed');
+        return;
+      }
+      if (cancelled || !containerRef.current) return;
+      try {
+        map = new maplibregl.Map({
+          container: containerRef.current,
+          style,
+          center: CONFIG.map.initialCenter,
+          zoom: CONFIG.map.initialZoom,
+          attributionControl: false,
+          maxPitch: 65,
+          dragRotate: false,
+        });
+      } catch (err) {
+        onStatusRef.current?.('error', err instanceof Error ? err.message : 'WebGL init failed');
+        return;
+      }
+    })().then(() => {
+      const m = map;
+      if (!m || cancelled) return;
+      m.addControl(
+        new maplibregl.AttributionControl({ compact: true, customAttribution: OSM_ATTRIBUTION }),
+        'bottom-right',
+      );
+
+      m.on('load', () => {
+        styleLoadedRef.current = true;
+        window.clearTimeout(styleTimer);
+        m.resize();
+        syncDynamic();
+        onStatusRef.current?.('ready', undefined, 'gl');
+        tileWatchdog = window.setTimeout(() => {
+          if (contentTiles.n === 0) {
+            onStatusRef.current?.('error', 'style loaded but no map tiles rendered (network blocked?)');
+          }
+        }, 8000);
       });
-    } catch (err) {
-      onStatusRef.current?.('error', err instanceof Error ? err.message : 'WebGL init failed');
-      return;
-    }
-    map.addControl(
-      new maplibregl.AttributionControl({ compact: true, customAttribution: OSM_ATTRIBUTION }),
-      'bottom-right',
-    );
+      m.on('style.load', () => {
+        styleLoadedRef.current = true;
+        contentTiles.n = 0;
+        syncDynamic();
+      });
+      m.on('sourcedata', (e) => {
+        const ev = e as { sourceDataType?: string; isSourceLoaded?: boolean };
+        if (ev.sourceDataType === 'content' && ev.isSourceLoaded) contentTiles.n += 1;
+      });
+      m.on('error', (e) => {
+        const msg = (e as { error?: { message?: string } }).error?.message ?? 'map error';
+        // Pre-load failures (style / WebGL / context loss) mean a blank map -> surface them.
+        // After load, single tile/image hiccups are transient and the map still renders -> ignore.
+        const fatal = !styleLoadedRef.current || /webgl|context|style/i.test(msg);
+        if (fatal && errorCountRef.current++ < 3) {
+          onStatusRef.current?.('error', msg);
+        } else if (!fatal) {
+          console.warn('[lostless] transient map tile error (ignored):', msg);
+        }
+      });
 
-    map.on('load', () => {
-      styleLoadedRef.current = true;
-      syncDynamic();
-      onStatusRef.current?.('ready');
-    });
-    map.on('style.load', () => {
-      styleLoadedRef.current = true;
-      syncDynamic();
-    });
-    map.on('error', (e) => {
-      const msg = (e as { error?: { message?: string } }).error?.message ?? 'map error';
-      // Pre-load failures (style / WebGL / context loss) mean a blank map -> surface them.
-      // After load, single tile/image hiccups are transient and the map still renders -> ignore.
-      const fatal = !styleLoadedRef.current || /webgl|context|style/i.test(msg);
-      if (fatal && errorCountRef.current++ < 3) {
-        onStatusRef.current?.('error', msg);
-      } else if (!fatal) {
-        console.warn('[lostless] transient map tile error (ignored):', msg);
-      }
-    });
+      // keep the canvas sized to its container (sheet drags / rotation / keyboard)
+      const ro = new ResizeObserver(() => m.resize());
+      ro.observe(container);
+      (m as unknown as { __ro?: ResizeObserver }).__ro = ro;
 
-    // tap = drop destination pin, but ignore taps that were actually drags
-    let down: { x: number; y: number } | null = null;
-    const downHandler = (e: maplibregl.MapMouseEvent | maplibregl.MapTouchEvent) => {
-      down = { x: e.point.x, y: e.point.y };
-    };
-    map.on('mousedown', downHandler);
-    map.on('touchstart', downHandler);
-    map.on('click', (e) => {
-      if (down && Math.hypot(e.point.x - down.x, e.point.y - down.y) < 10) {
-        onTapRef.current([e.lngLat.lng, e.lngLat.lat]);
-      }
-      down = null;
-    });
+      // tap = drop destination pin, but ignore taps that were actually drags
+      let down: { x: number; y: number } | null = null;
+      const downHandler = (e: maplibregl.MapMouseEvent | maplibregl.MapTouchEvent) => {
+        down = { x: e.point.x, y: e.point.y };
+      };
+      m.on('mousedown', downHandler);
+      m.on('touchstart', downHandler);
+      m.on('click', (e) => {
+        if (down && Math.hypot(e.point.x - down.x, e.point.y - down.y) < 10) {
+          onTapRef.current([e.lngLat.lng, e.lngLat.lat]);
+        }
+        down = null;
+      });
 
-    // GPS dot marker
-    const meEl = document.createElement('div');
-    meEl.className = 'me-marker';
-    meEl.innerHTML = '<span class="me-ring"></span><span class="me-dot"></span>';
-    meMarkerRef.current = new maplibregl.Marker({ element: meEl, anchor: 'center' });
+      // GPS dot marker
+      const meEl = document.createElement('div');
+      meEl.className = 'me-marker';
+      meEl.innerHTML = '<span class="me-ring"></span><span class="me-dot"></span>';
+      meMarkerRef.current = new maplibregl.Marker({ element: meEl, anchor: 'center' });
 
-    // destination pin
-    const destEl = document.createElement('div');
-    destEl.className = 'dest-marker';
-    destMarkerRef.current = new maplibregl.Marker({ element: destEl, anchor: 'center' });
+      // destination pin
+      const destEl = document.createElement('div');
+      destEl.className = 'dest-marker';
+      destMarkerRef.current = new maplibregl.Marker({ element: destEl, anchor: 'center' });
 
-    mapRef.current = map;
-    const reduced = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    props.onMapReady?.({
-      getCenter: () => {
-        const c = map.getCenter();
-        return [c.lng, c.lat];
-      },
-      zoomBy: (d: number) => map.zoomTo(map.getZoom() + d),
-      centerOn: (ll: [number, number], zoom?: number) => {
-        const z = zoom ?? Math.max(map.getZoom(), CONFIG.map.minFollowZoom);
-        if (reduced()) map.jumpTo({ center: ll, zoom: z });
-        else map.easeTo({ center: ll, zoom: z, duration: 500 });
-      },
+      mapRef.current = m;
+      const reduced = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      props.onMapReady?.({
+        getCenter: () => {
+          const c = m.getCenter();
+          return [c.lng, c.lat];
+        },
+        zoomBy: (d: number) => m.zoomTo(m.getZoom() + d),
+        centerOn: (ll: [number, number], zoom?: number) => {
+          const z = zoom ?? Math.max(m.getZoom(), CONFIG.map.minFollowZoom);
+          if (reduced()) m.jumpTo({ center: ll, zoom: z });
+          else m.easeTo({ center: ll, zoom: z, duration: 500 });
+        },
+      });
     });
 
     return () => {
-      map.remove();
+      cancelled = true;
+      window.clearTimeout(styleTimer);
+      window.clearTimeout(tileWatchdog);
+      const m = map;
+      if (m) (m as unknown as { __ro?: ResizeObserver }).__ro?.disconnect();
+      if (m) m.remove();
       mapRef.current = null;
       styleLoadedRef.current = false;
     };
@@ -218,7 +288,13 @@ function GlMapView(props: MapViewProps) {
   useEffect(() => {
     const map = mapRef.current;
     if (map && styleLoadedRef.current && map.isStyleLoaded()) {
-      map.setStyle(styleFor(props.theme));
+      void resolveStyle(props.theme)
+        .then((s) => {
+          if (mapRef.current === map) map.setStyle(s);
+        })
+        .catch(() => {
+          /* style swap failure is surfaced by the map error handler */
+        });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.theme]);

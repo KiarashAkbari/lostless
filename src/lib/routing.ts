@@ -1,4 +1,4 @@
-import { CONFIG, type TravelMode } from '../config';
+import { CONFIG, svcUrl, type TravelMode } from '../config';
 import type { RouteResult, RouteStep } from '../types';
 import { decodePolyline } from './geo';
 import { maneuverLabel } from './maneuvers';
@@ -101,7 +101,7 @@ async function routeValhallaOnce(baseUrl: string, mode: TravelMode, from: [numbe
     directions_options: { units: 'kilometers' },
     // shape_format defaults to polyline6
   };
-  const url = `${baseUrl}/route?json=${encodeURIComponent(JSON.stringify(payload))}`;
+  const url = `${svcUrl(baseUrl)}/route?json=${encodeURIComponent(JSON.stringify(payload))}`;
   return parseValhalla((await fetchJson(url)) as ValhallaResponse);
 }
 
@@ -128,7 +128,7 @@ interface OsrmStep {
 async function routeOsrm(mode: TravelMode, from: [number, number], to: [number, number]): Promise<RouteResult> {
   const profile = CONFIG.routing.osrm.profiles[mode];
   const url =
-    `${CONFIG.routing.osrm.baseUrl}/route/v1/${profile}/` +
+    `${svcUrl(CONFIG.routing.osrm.baseUrl)}/route/v1/${profile}/` +
     `${from[0]},${from[1]};${to[0]},${to[1]}` +
     `?steps=true&geometries=geojson&overview=full`;
   const data = (await fetchJson(url)) as {

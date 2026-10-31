@@ -35,6 +35,7 @@ const glMap = {
   jumpTo: vi.fn(),
   setStyle: vi.fn(),
   getBearing: () => 0,
+  resize: vi.fn(),
 };
 // plain function (not arrow) so `new Map()` works and returns the shared instance
 function FakeMap(this: unknown) {
@@ -48,6 +49,7 @@ vi.mock('maplibre-gl', () => ({
     },
     AttributionControl: vi.fn(),
     supported: () => true,
+    config: { WORKER_URL: '' },
   },
 }));
 vi.mock('maplibre-gl/dist/maplibre-gl.css', () => ({}));

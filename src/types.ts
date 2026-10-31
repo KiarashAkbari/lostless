@@ -36,10 +36,17 @@ export type GpsStatus = 'locating' | 'ok' | 'denied' | 'error' | 'unsupported';
 
 export type SheetSnap = 'hidden' | 'peek' | 'full';
 
+export interface BannerAction {
+  label: string;
+  onClick: () => void;
+}
+
 export interface Banner {
   id: number;
   kind: 'error' | 'info';
   msg: string;
   tag?: string;
-  action?: { label: string; onClick: () => void };
+  action?: BannerAction;
+  /** optional second action (e.g. "USE RASTER MAP" next to RETRY) */
+  action2?: BannerAction;
 }

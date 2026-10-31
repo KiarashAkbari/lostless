@@ -23,6 +23,8 @@ export const CONFIG = {
     /** OpenFreeMap styles — dark for dark mode, positron for light mode. */
     darkStyleUrl: 'https://tiles.openfreemap.org/styles/dark',
     lightStyleUrl: 'https://tiles.openfreemap.org/styles/positron',
+    /** OSM raster tiles — only used by the no-WebGL2 Leaflet fallback map */
+    osmRasterUrl: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
     /** Frankfurt am Main — change to your home town. [lon, lat] */
     initialCenter: [8.6821, 50.1109] as [number, number],
     initialZoom: 12.5,
@@ -72,3 +74,52 @@ export const CONFIG = {
     theme: 'lostless:theme',
   },
 } as const;
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Preview proxy (Arena live preview)
+ * ─────────────────────────────────────────────────────────────────────────────
+ * The Arena live preview serves this app from a *.e2b.app host, where requests
+ * to third-party origins (tile servers, geocoder, routers) can be blocked —
+ * which shows up as a completely blank map. In that context every external
+ * call is routed through same-origin /proxy/* paths that vite (dev AND
+ * preview) forwards to the real services — see `serviceProxy` in vite.config.ts.
+ * On GitHub Pages (production) and in tests we use the direct https URLs.
+ * ─────────────────────────────────────────────────────────────────────────── */
+
+export const PROXY_PREFIX = '/proxy';
+
+/** production origin → same-origin proxy path (kept in sync with vite.config.ts) */
+const HOST_TO_PROXY: ReadonlyArray<readonly [string, string]> = [
+  ['https://tiles.openfreemap.org', `${PROXY_PREFIX}/ofm`],
+  ['https://nominatim.openstreetmap.org', `${PROXY_PREFIX}/nominatim`],
+  ['https://valhalla1.openstreetmap.de', `${PROXY_PREFIX}/valhalla1`],
+  ['https://valhalla2.openstreetmap.de', `${PROXY_PREFIX}/valhalla2`],
+  ['https://router.project-osrm.org', `${PROXY_PREFIX}/osrm`],
+  ['https://tile.openstreetmap.org', `${PROXY_PREFIX}/osm`],
+];
+
+/** true when the app is served from the Arena live preview (*.e2b.app) */
+export function previewProxied(hostname: string = typeof window !== 'undefined' ? window.location.hostname : ''): boolean {
+  return /(^|\.)e2b\.app$/i.test(hostname);
+}
+
+/** Map a production service URL to the URL actually used at runtime. */
+export function svcUrl(url: string, hostname?: string): string {
+  if (!previewProxied(hostname)) return url;
+  for (const [host, proxyPath] of HOST_TO_PROXY) {
+    if (url.startsWith(host)) return proxyPath + url.slice(host.length);
+  }
+  return url;
+}
+
+/** Rewrite every known absolute URL inside a map style JSON (sources, sprite, glyphs, …). */
+export function rewriteStyleUrls<T>(node: T, hostname?: string): T {
+  if (typeof node === 'string') return svcUrl(node, hostname) as unknown as T;
+  if (Array.isArray(node)) return node.map((v) => rewriteStyleUrls(v, hostname)) as unknown as T;
+  if (node && typeof node === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(node as Record<string, unknown>)) out[k] = rewriteStyleUrls(v, hostname);
+    return out as T;
+  }
+  return node;
+}
