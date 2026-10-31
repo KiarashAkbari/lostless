@@ -1,0 +1,21 @@
+name: Feature request
+title: "feat: "
+labels: [enhancement]
+description: An idea for lostless. Keep it small — this app stays tiny on purpose.
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like?
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why is it useful to you?
+  - type: checkboxes
+    id: free
+    attributes:
+      label: Please confirm
+      options:
+        - label: This can be done with free, key-less services only (no paid APIs)

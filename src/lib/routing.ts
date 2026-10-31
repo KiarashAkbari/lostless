@@ -1,0 +1,148 @@
+import { CONFIG, type TravelMode } from '../config';
+import type { RouteResult, RouteStep } from '../types';
+import { decodePolyline } from './geo';
+import { maneuverLabel } from './maneuvers';
+
+const cap = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
+
+/**
+ * Routing client. The engine + URLs live in src/config.ts only.
+ *
+ *  · valhalla (default): FOSSGIS public instance — supports car / walk / bike.
+ *  · osrm:               OSRM demo server — public demo only loads "driving",
+ *                        point `config.routing.osrm.baseUrl` at your own server
+ *                        for foot/bike.
+ */
+
+async function fetchJson(url: string): Promise<unknown> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), CONFIG.routing.timeoutMs);
+  try {
+    const res = await fetch(url, { signal: ctrl.signal, headers: { Accept: 'application/json' } });
+    if (!res.ok) throw new Error(`routing failed (HTTP ${res.status})`);
+    return await res.json();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+const stripTags = (s: string) => s.replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
+
+async function routeValhalla(mode: TravelMode, from: [number, number], to: [number, number]): Promise<RouteResult> {
+  const costing = CONFIG.routing.valhalla.costing[mode];
+  const payload = {
+    locations: [
+      { lat: from[1], lon: from[0] },
+      { lat: to[1], lon: to[0] },
+    ],
+    costing,
+    costing_options: { [costing]: { country_crossing_penalty: 2000 } },
+    units: 'kilometers',
+    directions_options: { units: 'kilometers' },
+    // shape_format defaults to polyline6
+  };
+  const url = `${CONFIG.routing.valhalla.baseUrl}/route?json=${encodeURIComponent(JSON.stringify(payload))}`;
+  const data = (await fetchJson(url)) as {
+    trip?: {
+      summary?: { length: number; time: number };
+      legs?: Array<{
+        shape: string;
+        maneuvers?: Array<{
+          instruction: string;
+          street_names?: string[];
+          distance: number; // km (units=kilometers)
+          time: number; // s
+          type: number;
+          modifier?: string;
+          begin_shape_index: number;
+        }>;
+      }>;
+    };
+    error?: string;
+    error_code?: number;
+  };
+  if (!data.trip || !data.trip.legs?.length) {
+    throw new Error(data.error ? `valhalla: ${data.error}` : 'valhalla: no route found');
+  }
+  const leg = data.trip.legs[0];
+  const coords = decodePolyline(leg.shape); // [lon, lat]
+  const steps: RouteStep[] = (leg.maneuvers ?? []).map((m) => ({
+    instruction: stripTags(m.instruction),
+    street: (m.street_names ?? []).join(', '),
+    distanceM: m.distance * 1000,
+    durationS: m.time,
+    type: valhallaTypeName(m.type),
+    modifier: m.modifier,
+    location: coords[Math.min(m.begin_shape_index, coords.length - 1)] ?? [0, 0],
+  }));
+  return {
+    coords,
+    steps,
+    distanceM: (data.trip.summary?.length ?? 0) * 1000,
+    durationS: data.trip.summary?.time ?? 0,
+  };
+}
+
+// Valhalla maneuver type ids → OSRM-ish names, so both engines share one UI vocabulary
+const VALHALLA_TYPES: Record<number, string> = {
+  0: 'depart', 1: 'arrive', 2: 'turn', 3: 'continue', 4: 'merge', 5: 'fork',
+  6: 'roundabout', 7: 'rotary', 8: 'exit roundabout', 9: 'ferry', 10: 'new name',
+  11: 'notification', 12: 'use lane', 13: 'off ramp', 14: 'on ramp',
+};
+function valhallaTypeName(t: number): string {
+  return VALHALLA_TYPES[t] ?? 'continue';
+}
+
+async function routeOsrm(mode: TravelMode, from: [number, number], to: [number, number]): Promise<RouteResult> {
+  const profile = CONFIG.routing.osrm.profiles[mode];
+  const url =
+    `${CONFIG.routing.osrm.baseUrl}/route/v1/${profile}/` +
+    `${from[0]},${from[1]};${to[0]},${to[1]}` +
+    `?steps=true&geometries=geojson&overview=full`;
+  const data = (await fetchJson(url)) as {
+    code: string;
+    routes?: Array<{
+      distance: number;
+      duration: number;
+      geometry: { coordinates: [number, number][] };
+      legs: Array<{
+        steps: Array<{
+          name: string;
+          distance: number;
+          duration: number;
+          maneuver: { type: string; modifier?: string; location: [number, number] };
+          instruction?: string;
+        }>;
+      }>;
+    }>;
+    message?: string;
+  };
+  if (data.code !== 'Ok' || !data.routes?.length) {
+    throw new Error(data.message ? `osrm: ${data.message}` : 'osrm: no route found');
+  }
+  const r = data.routes[0];
+  const steps: RouteStep[] = r.legs.flatMap((l) =>
+    l.steps.map((s) => {
+      const label = cap(maneuverLabel({ type: s.maneuver.type, modifier: s.maneuver.modifier }));
+      return {
+        instruction: s.name && s.maneuver.type !== 'arrive' ? `${label} onto ${s.name}` : label,
+        street: s.name,
+        distanceM: s.distance,
+        durationS: s.duration,
+        type: s.maneuver.type,
+        modifier: s.maneuver.modifier,
+        location: s.maneuver.location,
+      };
+    }),
+  );
+  return {
+    coords: r.geometry.coordinates,
+    steps,
+    distanceM: r.distance,
+    durationS: r.duration,
+  };
+}
+
+export function getRoute(mode: TravelMode, from: [number, number], to: [number, number]): Promise<RouteResult> {
+  return CONFIG.routing.engine === 'valhalla' ? routeValhalla(mode, from, to) : routeOsrm(mode, from, to);
+}
