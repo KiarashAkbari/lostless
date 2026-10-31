@@ -86,6 +86,20 @@ export function formatCoord(lat: number, lon: number): string {
   return `${Math.abs(lat).toFixed(5)}°${ns} ${Math.abs(lon).toFixed(5)}°${ew}`;
 }
 
+/** approximate circle polygon around center (for the GPS accuracy bubble), [lon, lat][] ring */
+export function circlePolygon(center: [number, number], radiusM: number, n = 40): [number, number][] {
+  const [lon, lat] = center;
+  const latM = 110540;
+  const lonM = 111320 * Math.cos((lat * Math.PI) / 180);
+  const ring: [number, number][] = [];
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * 2 * Math.PI;
+    ring.push([lon + (Math.cos(a) * radiusM) / lonM, lat + (Math.sin(a) * radiusM) / latM]);
+  }
+  ring.push(ring[0]);
+  return ring;
+}
+
 /** decode Google/Valhalla polyline (precision 1e6 → [lon, lat][]) */
 export function decodePolyline(str: string, precision = 6): [number, number][] {
   const factor = 10 ** precision;

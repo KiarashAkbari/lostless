@@ -18,11 +18,19 @@
 
 export type TravelMode = 'car' | 'walk' | 'bike';
 
+/** map style choices (all free OpenFreeMap styles, no key) */
+export type MapStyle = 'auto' | 'dark' | 'light' | 'liberty' | 'bright';
+
 export const CONFIG = {
   map: {
     /** OpenFreeMap styles — dark for dark mode, positron for light mode. */
     darkStyleUrl: 'https://tiles.openfreemap.org/styles/dark',
     lightStyleUrl: 'https://tiles.openfreemap.org/styles/positron',
+    /** extra quality styles the user can pin in the sidebar */
+    extraStyleUrls: {
+      liberty: 'https://tiles.openfreemap.org/styles/liberty',
+      bright: 'https://tiles.openfreemap.org/styles/bright',
+    } as Record<Exclude<MapStyle, 'auto' | 'dark' | 'light'>, string>,
     /** OSM raster tiles — only used by the no-WebGL2 Leaflet fallback map */
     osmRasterUrl: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
     /** Frankfurt am Main — change to your home town. [lon, lat] */
@@ -72,8 +80,29 @@ export const CONFIG = {
   storageKeys: {
     favorites: 'lostless:favorites:v1',
     theme: 'lostless:theme',
+    settings: 'lostless:settings:v1',
+  },
+
+  /** UI / UX defaults (persisted per device via the settings key) */
+  ui: {
+    /** spoken turn-by-turn while navigating (uses the OS speech engine — free, offline-ish) */
+    voiceDefault: false,
+    /** prefer Persian (fa) place labels on the map when the data has them */
+    faLabelsDefault: false,
+    /** map style; 'auto' follows the light/dark theme */
+    mapStyleDefault: 'auto' as MapStyle,
+    /** auto-enable lite mode on weak hardware (<=4 cores or <=4 GB RAM) */
+    perfAutoDetect: true,
   },
 } as const;
+
+/** resolve the style URL for a theme + pinned style choice */
+export function styleUrlFor(theme: 'dark' | 'light', mapStyle: MapStyle): string {
+  if (mapStyle === 'dark') return CONFIG.map.darkStyleUrl;
+  if (mapStyle === 'light') return CONFIG.map.lightStyleUrl;
+  if (mapStyle === 'liberty' || mapStyle === 'bright') return CONFIG.map.extraStyleUrls[mapStyle];
+  return theme === 'dark' ? CONFIG.map.darkStyleUrl : CONFIG.map.lightStyleUrl;
+}
 
 /* ─────────────────────────────────────────────────────────────────────────────
  * Preview proxy (Arena live preview)

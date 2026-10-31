@@ -5,6 +5,16 @@ routes for car / walk / bike, screen stays awake while navigating, favorites sav
 
 **100% free — no API keys, no accounts, no credit card.**
 
+UX: frosted-glass "apple-chic" UI (curved panels, pills and switches) on top of a minimal
+mono/abstract base. Hitting **START** enters a full-screen **navigation mode** (Neshan/Balad
+style): big next-turn card with progress bar, arrival time, remaining distance, live speed,
+optional voice guidance (browser speech engine), heading-rotated map and a snapped-to-route
+GPS dot with an accuracy bubble. A side **drawer** holds saved places, settings (theme,
+map style: dark/light/liberty/bright, Persian `name:fa` labels, voice, lite mode) and about.
+On older phones a **LITE MODE** auto-enables on weak hardware (≤4 cores / ≤4 GB RAM):
+lightweight raster map + no animations; if the WebGL map ever fails, the app automatically
+falls back to the raster map instead of showing a blank map.
+
 | Need | What we use | Cost |
 |---|---|---|
 | Map rendering | [MapLibre GL JS](https://maplibre.org/) (open source) | free |
@@ -38,10 +48,13 @@ CI runs `npm ci && npm test && npm run build` on every pull request and push to
 includes a jsdom smoke test that drives the whole flow (search → pick → route →
 START → STOP, map-tap → pin, GPS-denied banner) with a mocked map/network.
 
-**Performance:** the map library is lazy-loaded, so the initial JS is ~57 kB gzip
-(the ~290 kB gzip MapLibre chunk loads in parallel); `preconnect`/`dns-prefetch`
-hints warm up the tile/geocoding/routing hosts; the service worker precaches the
-app shell and caches map tiles.
+**Performance:** the map library is lazy-loaded and warmed during browser idle, so the
+initial JS is ~57 kB gzip and the ~290 kB gzip MapLibre chunk prefetches in the background;
+`preconnect`/`dns-prefetch` hints warm up the tile/geocoding/routing hosts; the service
+worker precaches the app shell and caches only HTTP-200 map tiles. In the Arena live
+preview (`*.e2b.app`) all external calls go through same-origin `/proxy/*` paths that
+vite forwards, and the MapLibre worker is served same-origin so a strict CSP can't blank
+the map.
 
 ## Deploy for free
 

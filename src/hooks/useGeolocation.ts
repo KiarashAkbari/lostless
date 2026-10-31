@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { GpsStatus } from '../types';
+import { haversineM } from '../lib/geo';
 
 export interface GeoState {
   status: GpsStatus;
@@ -7,11 +8,17 @@ export interface GeoState {
   retry: () => void;
 }
 
-/** Watches the GPS position. Starts automatically; `retry` re-requests permission. */
+/**
+ * Watches the GPS position with high accuracy and lightly smooths it
+ * (exponential moving average) so the blue dot doesn't jitter on screen.
+ * `retry` re-requests permission. Raw heading/accuracy/speed always come
+ * from the latest fix.
+ */
 export function useGeolocation(): GeoState {
   const [status, setStatus] = useState<GpsStatus>('locating');
   const [pos, setPos] = useState<GeolocationPosition | null>(null);
   const watchId = useRef<number | null>(null);
+  const smoothRef = useRef<{ lat: number; lon: number } | null>(null);
 
   const start = useCallback(() => {
     if (!('geolocation' in navigator)) {
@@ -22,13 +29,30 @@ export function useGeolocation(): GeoState {
     if (watchId.current !== null) navigator.geolocation.clearWatch(watchId.current);
     watchId.current = navigator.geolocation.watchPosition(
       (p) => {
-        setPos(p);
+        const { latitude, longitude, accuracy } = p.coords;
+        const prev = smoothRef.current;
+        let lat = latitude;
+        let lon = longitude;
+        if (prev) {
+          const moved = haversineM([prev.lon, prev.lat], [longitude, latitude]);
+          // strong signal + big jump → trust the new fix; weak signal → smooth harder
+          const alpha = accuracy > 60 ? 0.8 : moved > 25 ? 0.7 : moved > 3 ? 0.45 : 0.2;
+          lat = prev.lat + (latitude - prev.lat) * alpha;
+          lon = prev.lon + (longitude - prev.lon) * alpha;
+        }
+        smoothRef.current = { lat, lon };
+        const smoothed = {
+          ...p,
+          coords: { ...p.coords, latitude: lat, longitude: lon },
+        } as GeolocationPosition;
+        setPos(smoothed);
         setStatus('ok');
       },
       (err) => {
         setStatus(err.code === err.PERMISSION_DENIED ? 'denied' : 'error');
       },
-      { enableHighAccuracy: true, maximumAge: 4000, timeout: 20000 },
+      // precise tracking: always ask for the best fix, never a cached one
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 27000 },
     );
   }, []);
 
