@@ -26,7 +26,7 @@ export function RasterMapView(props: MapViewProps) {
   const onStatusRef = useRef(props.onStatus);
   onStatusRef.current = props.onStatus;
 
-  const reduced = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const reduced = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches || (props.perf ?? false);
   const toLatLng = (c: [number, number]): [number, number] => [c[1], c[0]];
 
   // init
@@ -77,11 +77,12 @@ export function RasterMapView(props: MapViewProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // GPS dot + accuracy
+  // GPS dot + accuracy (dot drawn at displayPos when snapped to the route)
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !props.pos) return;
-    const { latitude, longitude, accuracy } = props.pos.coords;
+    const p = props.displayPos ?? props.pos;
+    if (!map || !p) return;
+    const { latitude, longitude, accuracy } = p.coords;
     if (!meRef.current) {
       meRef.current = L.circleMarker([latitude, longitude], {
         radius: 7, color: '#0b0d0e', weight: 2, fillColor: '#c8ff2e', fillOpacity: 1,
@@ -94,7 +95,7 @@ export function RasterMapView(props: MapViewProps) {
       accRef.current?.setLatLng([latitude, longitude]).setRadius(accuracy);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.pos]);
+  }, [props.pos, props.displayPos]);
 
   // destination pin
   useEffect(() => {
@@ -152,8 +153,9 @@ export function RasterMapView(props: MapViewProps) {
   // follow GPS while navigating
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !props.navigating || !props.follow || !props.pos) return;
-    const { latitude, longitude } = props.pos.coords;
+    const p = props.displayPos ?? props.pos;
+    if (!map || !props.navigating || !props.follow || !p) return;
+    const { latitude, longitude } = p.coords;
     map.setView([latitude, longitude], Math.max(map.getZoom(), CONFIG.map.navigationZoom), { animate: !reduced() });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.pos, props.navigating, props.follow]);

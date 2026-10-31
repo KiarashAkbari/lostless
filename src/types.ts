@@ -1,6 +1,6 @@
-import type { TravelMode } from './config';
+import type { MapStyle, TravelMode } from './config';
 
-export type { TravelMode };
+export type { TravelMode, MapStyle };
 
 /** A searchable / pinnable place. Coordinates are WGS84. */
 export interface Place {
@@ -33,6 +33,18 @@ export interface RouteResult {
 }
 
 export type GpsStatus = 'locating' | 'ok' | 'denied' | 'error' | 'unsupported';
+
+/** per-device UI settings, persisted in localStorage */
+export interface Settings {
+  /** spoken turn-by-turn while navigating */
+  voice: boolean;
+  /** lite mode: raster map + no animations — for older / weaker phones */
+  perf: boolean;
+  /** prefer Persian (name:fa) place labels on the map */
+  faLabels: boolean;
+  /** pinned map style ('auto' follows the theme) */
+  mapStyle: MapStyle;
+}
 
 export type SheetSnap = 'hidden' | 'peek' | 'full';
 

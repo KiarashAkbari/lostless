@@ -1,6 +1,6 @@
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import { CONFIG, type TravelMode } from './config';
-import type { Banner, Place, RouteResult, SheetSnap } from './types';
+import type { Banner, Place, RouteResult, Settings, SheetSnap } from './types';
 import { useGeolocation } from './hooks/useGeolocation';
 import { useTheme } from './hooks/useTheme';
 import { Sheet } from './components/Sheet';
@@ -11,12 +11,16 @@ import { StepsList } from './components/StepsList';
 import { NavOverlay } from './components/NavOverlay';
 import { MapButtons } from './components/MapButtons';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { Sidebar } from './components/Sidebar';
 import type { MapApi, MapRenderer, MapStatus } from './components/MapView';
 import { searchPlaces, reverseGeocode } from './lib/geocode';
 import { getRoute } from './lib/routing';
-import { nearestOnPolyline, formatCoord } from './lib/geo';
-import { getFavorites, isFavorite, addFavorite, removeFavorite } from './lib/storage';
+import { nearestOnPolyline, formatCoord, formatDistance, haversineM } from './lib/geo';
+import { maneuverLabel } from './lib/maneuvers';
+import { getFavorites, isFavorite, addFavorite, removeFavorite, getSettings, setSettings as persistSettings } from './lib/storage';
 import { acquireWakeLock, releaseWakeLock, reacquireOnVisible, wakeLockSupported } from './lib/wakelock';
+import { weakHardware } from './lib/perf';
+import { speak, cancelSpeech } from './lib/voice';
 
 // MapLibre (~1.2 MB) loads in its own chunk, after the UI is already interactive
 const MapView = lazy(() => import('./components/MapView').then((m) => ({ default: m.MapView })));
@@ -54,8 +58,29 @@ export default function App() {
   const [online, setOnline] = useState<boolean>(navigator.onLine);
   const [mapStatus, setMapStatus] = useState<MapStatus>('loading');
   const [mapRenderer, setMapRenderer] = useState<MapRenderer>('gl');
-  const [forceRaster, setForceRaster] = useState(false);
   const [mapKey, setMapKey] = useState(0); // bump to re-mount the map (retry)
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  // per-device settings; lite mode auto-on for weak hardware unless the user chose explicitly
+  const [settings, setSettingsState] = useState<Settings>(() => {
+    const s = getSettings();
+    let stored = false;
+    try {
+      stored = localStorage.getItem(CONFIG.storageKeys.settings) !== null;
+    } catch {
+      stored = false;
+    }
+    return { ...s, perf: stored ? s.perf : CONFIG.ui.perfAutoDetect && weakHardware() };
+  });
+  const [displayPos, setDisplayPos] = useState<GeolocationPosition | null>(null); // dot position (snapped to route while navigating)
+  const [speedKmh, setSpeedKmh] = useState<number | null>(null);
+  const autoRasterTried = useRef(false);
+  const prevFix = useRef<{ ll: [number, number]; t: number } | null>(null);
+  const forceRaster = settings.perf;
+
+  const updateSettings = useCallback((s: Settings) => {
+    setSettingsState(s);
+    persistSettings(s);
+  }, []);
 
   // refs for use inside callbacks/effects without re-subscribing
   const mapApi = useRef<MapApi | null>(null);
@@ -221,14 +246,33 @@ export default function App() {
   const startNav = useCallback(() => {
     setNavigating(true);
     setFollow(true);
-    setSnap('peek');
-  }, []);
+    setSnap('hidden'); // navigation mode: map gets the whole screen
+    if (settings.voice) speak('Navigation started');
+  }, [settings.voice]);
 
   const stopNav = useCallback(() => {
     setNavigating(false);
     setNav(null);
     setRemainingCoords(null);
+    setDisplayPos(null);
+    setSpeedKmh(null);
+    cancelSpeech();
   }, []);
+
+  // voice guidance: speak the next maneuver whenever the step changes
+  const lastSpokenStep = useRef(-1);
+  useEffect(() => {
+    if (!navigating || !nav || !route || !settings.voice) return;
+    if (nav.stepIndex === lastSpokenStep.current) return;
+    lastSpokenStep.current = nav.stepIndex;
+    const step = route.steps[nav.stepIndex];
+    if (!step) return;
+    const label = maneuverLabel(step);
+    const dist = formatDistance(nav.distToNextM);
+    speak(`In ${dist}, ${label}${step.street ? ` onto ${step.street}` : ''}`.replace(/\s+/g, ' ').trim());
+  }, [navigating, nav, route, settings.voice]);
+
+  useEffect(() => () => cancelSpeech(), []);
 
   const clearDestination = useCallback(() => {
     stopNav();
@@ -253,11 +297,35 @@ export default function App() {
     };
   }, [navigating, pushBanner]);
 
-  // live position → progress along route, off-route detection, remaining polyline
+  // live position → progress along route, off-route detection, remaining polyline,
+  // snapped dot position + speed readout
   useEffect(() => {
     if (!navigating || !route || !geo.pos) return;
     const p: [number, number] = [geo.pos.coords.longitude, geo.pos.coords.latitude];
     const near = nearestOnPolyline(route.coords, p);
+
+    // snap the dot onto the route when we're close to it (smoother tracking)
+    if (near.distM < 40) {
+      setDisplayPos({ ...geo.pos, coords: { ...geo.pos.coords, longitude: near.point[0], latitude: near.point[1] } });
+    } else {
+      setDisplayPos(null);
+    }
+
+    // speed: GPS-reported, else derived from consecutive fixes
+    const sp = geo.pos.coords.speed;
+    if (sp !== null && !Number.isNaN(sp)) {
+      setSpeedKmh(sp * 3.6);
+      prevFix.current = null;
+    } else {
+      const prev = prevFix.current;
+      const now = geo.pos.timestamp || Date.now();
+      if (prev && now > prev.t) {
+        const d = haversineM(prev.ll, p);
+        const dt = (now - prev.t) / 1000;
+        if (dt > 0.5 && dt < 30) setSpeedKmh((d / dt) * 3.6);
+      }
+      prevFix.current = { ll: p, t: now };
+    }
 
     setRemainingCoords([near.point, ...route.coords.slice(near.segmentIndex + 1)]);
 
@@ -310,6 +378,27 @@ export default function App() {
       if (renderer) setMapRenderer(renderer);
       setMapStatus(s);
       if (s === 'error') {
+        // the GL map failed (blank) — fall back to the raster map automatically, once
+        if (!forceRaster && !autoRasterTried.current) {
+          autoRasterTried.current = true;
+          updateSettings({ ...settings, perf: true });
+          setMapStatus('loading');
+          setMapKey((k) => k + 1);
+          pushBanner('info', `GL MAP UNAVAILABLE (${msg ?? 'unknown'}) — SWITCHED TO LITE RASTER MAP`, {
+            tag: 'map',
+            sticky: true,
+            action: {
+              label: 'TRY GL AGAIN',
+              onClick: () => {
+                autoRasterTried.current = false;
+                updateSettings({ ...settings, perf: false });
+                setMapStatus('loading');
+                setMapKey((k) => k + 1);
+              },
+            },
+          });
+          return;
+        }
         pushBanner('error', `MAP FAILED TO LOAD (${msg ?? 'unknown'}) — CHECK CONNECTION / WEBGL`, {
           tag: 'map',
           sticky: true,
@@ -323,7 +412,7 @@ export default function App() {
           action2: {
             label: 'USE RASTER MAP',
             onClick: () => {
-              setForceRaster(true);
+              updateSettings({ ...settings, perf: true });
               setMapStatus('loading');
               setMapKey((k) => k + 1);
             },
@@ -333,7 +422,7 @@ export default function App() {
         setBanners((b) => b.filter((x) => x.tag !== 'map'));
       }
     },
-    [pushBanner],
+    [pushBanner, forceRaster, settings, updateSettings],
   );
 
   // ── render ─────────────────────────────────────────────────────────────────
@@ -429,7 +518,7 @@ export default function App() {
   );
 
   return (
-    <div className="app">
+    <div className={`app${settings.perf ? ' perf' : ''}`}>
       <div className="map-wrap">
         <ErrorBoundary>
           <Suspense
@@ -444,13 +533,17 @@ export default function App() {
             <MapView
               key={mapKey}
               theme={theme}
+              mapStyle={settings.mapStyle}
               pos={geo.pos}
+              displayPos={displayPos}
               destination={destination}
               route={route}
               remainingCoords={navigating ? remainingCoords : null}
               navigating={navigating}
               follow={follow}
               forceRaster={forceRaster}
+              perf={settings.perf}
+              faLabels={settings.faLabels}
               onMapTap={onMapTap}
               onMapReady={(api) => {
                 mapApi.current = api;
@@ -463,6 +556,7 @@ export default function App() {
         <TopBar
           theme={theme}
           onToggleTheme={toggleTheme}
+          onOpenSidebar={() => setSidebarOpen(true)}
           gpsStatus={geo.status}
           onGpsRetry={geo.retry}
           online={online}
@@ -496,6 +590,10 @@ export default function App() {
             distToNextM={nav.distToNextM}
             remainingM={nav.remainingM}
             remainingS={nav.remainingS}
+            speedKmh={speedKmh}
+            progress={route.distanceM > 0 ? 1 - nav.remainingM / route.distanceM : 0}
+            mode={mode}
+            onStop={stopNav}
           />
         )}
 
@@ -519,6 +617,18 @@ export default function App() {
       </div>
 
       <Sheet snap={snap} onSnap={setSnap} peek={peekContent} body={bodyContent} />
+
+      <Sidebar
+        open={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
+        theme={theme}
+        onToggleTheme={toggleTheme}
+        settings={settings}
+        onSettings={updateSettings}
+        favorites={favorites}
+        onPick={pickPlace}
+        onRemoveFav={(id) => setFavorites(removeFavorite(id))}
+      />
     </div>
   );
 }

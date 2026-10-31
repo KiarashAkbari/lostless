@@ -2,9 +2,10 @@ import { Suspense, lazy, useEffect, useMemo, useRef } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import type { Feature, LineString } from 'geojson';
-import { CONFIG, previewProxied, svcUrl, rewriteStyleUrls } from '../config';
+import { CONFIG, previewProxied, svcUrl, rewriteStyleUrls, styleUrlFor, type MapStyle } from '../config';
 import type { Place, RouteResult } from '../types';
 import type { Theme } from '../hooks/useTheme';
+import { circlePolygon } from '../lib/geo';
 
 // Load the MapLibre worker from a same-origin file instead of the default
 // inline blob worker, so the map also works where a CSP blocks blob: workers
@@ -25,7 +26,11 @@ export type MapRenderer = 'gl' | 'raster';
 
 export interface MapViewProps {
   theme: Theme;
+  /** pinned map style ('auto' follows the theme) */
+  mapStyle?: MapStyle;
   pos: GeolocationPosition | null;
+  /** position to draw the dot at (snapped to the route while navigating) */
+  displayPos?: GeolocationPosition | null;
   destination: Place | null;
   route: RouteResult | null;
   /** while navigating: polyline from the current position to the destination */
@@ -34,6 +39,10 @@ export interface MapViewProps {
   follow: boolean;
   /** force the Leaflet raster fallback even when WebGL2 is available */
   forceRaster?: boolean;
+  /** lite mode: no animations, lower zoom cap, no world copies (older phones) */
+  perf?: boolean;
+  /** prefer Persian (name:fa) labels on symbol layers */
+  faLabels?: boolean;
   onMapTap: (lngLat: [number, number]) => void;
   /** lets the parent read the map center (fallback origin) and drive zoom/center */
   onMapReady?: (api: MapApi) => void;
@@ -76,7 +85,7 @@ export function MapView(props: MapViewProps) {
   return <GlMapView {...props} />;
 }
 
-const styleFor = (theme: Theme) => (theme === 'dark' ? CONFIG.map.darkStyleUrl : CONFIG.map.lightStyleUrl);
+const styleFor = (theme: Theme, mapStyle: MapStyle = 'auto') => styleUrlFor(theme, mapStyle);
 
 /**
  * Resolve the style for a theme. Production: pass the URL through (cached by
@@ -84,8 +93,8 @@ const styleFor = (theme: Theme) => (theme === 'dark' ? CONFIG.map.darkStyleUrl :
  * the same-origin proxy and rewrite every absolute URL inside it (sources,
  * sprite, glyphs) to the proxy too, so nothing cross-origin is requested.
  */
-async function resolveStyle(theme: Theme): Promise<string | maplibregl.StyleSpecification> {
-  const url = styleFor(theme);
+async function resolveStyle(theme: Theme, mapStyle: MapStyle = 'auto'): Promise<string | maplibregl.StyleSpecification> {
+  const url = styleFor(theme, mapStyle);
   if (!previewProxied()) return url;
   const res = await fetch(svcUrl(url), { headers: { Accept: 'application/json' } });
   if (!res.ok) throw new Error(`style HTTP ${res.status}`);
@@ -104,10 +113,19 @@ function GlMapView(props: MapViewProps) {
   const styleLoadedRef = useRef(false);
   const lastFollowRef = useRef<[number, number] | null>(null);
   const errorCountRef = useRef(0);
+  const origTextFieldRef = useRef(new Map<string, unknown>());
+  const applyLabelsRef = useRef<() => void>(() => {});
 
   // latest data for callbacks / style reloads (avoid stale closures)
-  const dataRef = useRef({ theme: props.theme, pos: props.pos, destination: props.destination, route: props.route, remaining: props.remainingCoords, navigating: props.navigating });
-  dataRef.current = { theme: props.theme, pos: props.pos, destination: props.destination, route: props.route, remaining: props.remainingCoords, navigating: props.navigating };
+  const dataRef = useRef({ theme: props.theme, mapStyle: props.mapStyle ?? 'auto', pos: props.pos, displayPos: props.displayPos ?? null, destination: props.destination, route: props.route, remaining: props.remainingCoords, navigating: props.navigating });
+  dataRef.current = { theme: props.theme, mapStyle: props.mapStyle ?? 'auto', pos: props.pos, displayPos: props.displayPos ?? null, destination: props.destination, route: props.route, remaining: props.remainingCoords, navigating: props.navigating };
+  const perfRef = useRef(props.perf ?? false);
+  perfRef.current = props.perf ?? false;
+  const faLabelsRef = useRef(props.faLabels ?? false);
+  faLabelsRef.current = props.faLabels ?? false;
+  const instantRef = useRef(false);
+  instantRef.current =
+    (typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches) || (props.perf ?? false);
   const onTapRef = useRef(props.onMapTap);
   onTapRef.current = props.onMapTap;
   const onStatusRef = useRef(props.onStatus);
@@ -164,7 +182,7 @@ function GlMapView(props: MapViewProps) {
     void (async () => {
       let style: string | maplibregl.StyleSpecification;
       try {
-        style = await resolveStyle(dataRef.current.theme);
+        style = await resolveStyle(dataRef.current.theme, dataRef.current.mapStyle);
       } catch (err) {
         if (!cancelled) onStatusRef.current?.('error', err instanceof Error ? err.message : 'style fetch failed');
         return;
@@ -177,7 +195,12 @@ function GlMapView(props: MapViewProps) {
           center: CONFIG.map.initialCenter,
           zoom: CONFIG.map.initialZoom,
           attributionControl: false,
-          maxPitch: 65,
+          // lite mode (older phones): flat, no world copies, instant fades
+          maxPitch: perfRef.current ? 0 : 65,
+          maxZoom: perfRef.current ? 19 : 22,
+          renderWorldCopies: false,
+          fadeDuration: perfRef.current ? 0 : 300,
+          refreshExpiredTiles: false,
           dragRotate: false,
         });
       } catch (err) {
@@ -192,10 +215,52 @@ function GlMapView(props: MapViewProps) {
         'bottom-right',
       );
 
+      // GPS accuracy bubble layer
+      const ensureAccuracy = () => {
+        if (!m.getSource('me-accuracy')) {
+          m.addSource('me-accuracy', { type: 'geojson', data: emptyLine });
+          m.addLayer({
+            id: 'me-accuracy-fill', type: 'fill', source: 'me-accuracy',
+            paint: { 'fill-color': getCssVar('--accent'), 'fill-opacity': 0.09 },
+          });
+          m.addLayer({
+            id: 'me-accuracy-line', type: 'line', source: 'me-accuracy',
+            paint: { 'line-color': getCssVar('--accent'), 'line-width': 1, 'line-opacity': 0.45 },
+          });
+        }
+      };
+
+      // Persian (name:fa) labels: wrap every symbol layer's text-field in a coalesce
+      const applyLabels = () => {
+        if (!faLabelsRef.current) return;
+        const st = m.getStyle();
+        if (!st?.layers) return;
+        for (const l of st.layers) {
+          if (l.type !== 'symbol') continue;
+          const orig = m.getLayoutProperty(l.id, 'text-field');
+          if (orig === undefined || orig === null) continue;
+          if (!origTextFieldRef.current.has(l.id)) origTextFieldRef.current.set(l.id, orig);
+          m.setLayoutProperty(l.id, 'text-field', ['coalesce', ['get', 'name:fa'], ['get', 'name:en'], ['get', 'name']]);
+        }
+      };
+      const restoreLabels = () => {
+        for (const [id, v] of origTextFieldRef.current) {
+          try {
+            m.setLayoutProperty(id, 'text-field', v as never);
+          } catch {
+            // layer may be gone after a style swap — fine
+          }
+        }
+        origTextFieldRef.current.clear();
+      };
+      applyLabelsRef.current = () => (faLabelsRef.current ? applyLabels() : restoreLabels());
+
       m.on('load', () => {
         styleLoadedRef.current = true;
         window.clearTimeout(styleTimer);
         m.resize();
+        ensureAccuracy();
+        applyLabels();
         syncDynamic();
         onStatusRef.current?.('ready', undefined, 'gl');
         tileWatchdog = window.setTimeout(() => {
@@ -207,6 +272,8 @@ function GlMapView(props: MapViewProps) {
       m.on('style.load', () => {
         styleLoadedRef.current = true;
         contentTiles.n = 0;
+        ensureAccuracy();
+        applyLabels();
         syncDynamic();
       });
       m.on('sourcedata', (e) => {
@@ -256,7 +323,6 @@ function GlMapView(props: MapViewProps) {
       destMarkerRef.current = new maplibregl.Marker({ element: destEl, anchor: 'center' });
 
       mapRef.current = m;
-      const reduced = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
       props.onMapReady?.({
         getCenter: () => {
           const c = m.getCenter();
@@ -265,7 +331,7 @@ function GlMapView(props: MapViewProps) {
         zoomBy: (d: number) => m.zoomTo(m.getZoom() + d),
         centerOn: (ll: [number, number], zoom?: number) => {
           const z = zoom ?? Math.max(m.getZoom(), CONFIG.map.minFollowZoom);
-          if (reduced()) m.jumpTo({ center: ll, zoom: z });
+          if (instantRef.current) m.jumpTo({ center: ll, zoom: z });
           else m.easeTo({ center: ll, zoom: z, duration: 500 });
         },
       });
@@ -284,11 +350,11 @@ function GlMapView(props: MapViewProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // theme → swap map style (layers are re-added on style.load)
+  // theme / pinned style → swap map style (layers are re-added on style.load)
   useEffect(() => {
     const map = mapRef.current;
     if (map && styleLoadedRef.current && map.isStyleLoaded()) {
-      void resolveStyle(props.theme)
+      void resolveStyle(props.theme, props.mapStyle ?? 'auto')
         .then((s) => {
           if (mapRef.current === map) map.setStyle(s);
         })
@@ -297,7 +363,15 @@ function GlMapView(props: MapViewProps) {
         });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.theme]);
+  }, [props.theme, props.mapStyle]);
+
+  // fa labels toggle → patch / restore symbol text-fields
+  useEffect(() => {
+    faLabelsRef.current = props.faLabels ?? false;
+    const map = mapRef.current;
+    if (map && styleLoadedRef.current && map.isStyleLoaded()) applyLabelsRef.current();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.faLabels]);
 
   // re-sync whenever data changes
   useEffect(() => {
@@ -305,16 +379,27 @@ function GlMapView(props: MapViewProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.route, props.remainingCoords, props.navigating, props.theme]);
 
-  // GPS dot
+  // GPS dot (+ accuracy bubble) — drawn at displayPos when provided (snapped to route)
   useEffect(() => {
     const marker = meMarkerRef.current;
     const map = mapRef.current;
     if (!marker || !map) return;
-    if (props.pos) {
-      marker.setLngLat([props.pos.coords.longitude, props.pos.coords.latitude]).addTo(map);
+    const p = props.displayPos ?? props.pos;
+    if (!p) return;
+    const ll: [number, number] = [p.coords.longitude, p.coords.latitude];
+    marker.setLngLat(ll).addTo(map);
+    if (styleLoadedRef.current && map.isStyleLoaded()) {
+      const src = map.getSource('me-accuracy') as maplibregl.GeoJSONSource | undefined;
+      if (src) {
+        src.setData({
+          type: 'Feature',
+          properties: {},
+          geometry: { type: 'Polygon', coordinates: [circlePolygon(ll, Math.max(5, p.coords.accuracy))] },
+        });
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.pos]);
+  }, [props.pos, props.displayPos]);
 
   // destination pin
   useEffect(() => {
@@ -329,11 +414,13 @@ function GlMapView(props: MapViewProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.destination]);
 
-  // follow GPS while navigating
+  // follow GPS while navigating (map rotates to the heading like a sat-nav)
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !props.navigating || !props.follow || !props.pos) return;
-    const { longitude, latitude, heading } = props.pos.coords;
+    if (!map || !props.navigating || !props.follow) return;
+    const p = props.displayPos ?? props.pos;
+    if (!p) return;
+    const { longitude, latitude, heading } = p.coords;
     const last = lastFollowRef.current;
     if (last) {
       const moved = Math.hypot((longitude - last[0]) * 111320 * Math.cos((latitude * Math.PI) / 180), (latitude - last[1]) * 110540);
@@ -342,13 +429,13 @@ function GlMapView(props: MapViewProps) {
     lastFollowRef.current = [longitude, latitude];
     const bearing = heading !== null && !Number.isNaN(heading) ? heading : map.getBearing();
     const target = { center: [longitude, latitude] as [number, number], zoom: Math.max(map.getZoom(), CONFIG.map.navigationZoom), bearing };
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    if (instantRef.current) {
       map.jumpTo(target);
     } else {
       map.easeTo({ ...target, duration: 600 });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.pos, props.navigating, props.follow]);
+  }, [props.pos, props.displayPos, props.navigating, props.follow]);
 
   return <div className="map-container" ref={containerRef} data-testid="map" />;
 }

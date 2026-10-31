@@ -36,6 +36,9 @@ const glMap = {
   setStyle: vi.fn(),
   getBearing: () => 0,
   resize: vi.fn(),
+  getStyle: () => ({ layers: [] }),
+  getLayoutProperty: () => undefined,
+  setLayoutProperty: vi.fn(),
 };
 // plain function (not arrow) so `new Map()` works and returns the shared instance
 function FakeMap(this: unknown) {
@@ -104,6 +107,11 @@ beforeAll(() => {
   (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
   (CONFIG.nominatim as { minIntervalMs: number }).minIntervalMs = 0;
   (CONFIG.routing as { minIntervalMs: number }).minIntervalMs = 0;
+  // pin settings with perf OFF — CI machines have few cores and would auto-enable lite mode
+  localStorage.setItem(
+    CONFIG.storageKeys.settings,
+    JSON.stringify({ voice: false, perf: false, faLabels: false, mapStyle: 'auto' }),
+  );
 
   window.matchMedia = ((q: string) => ({
     matches: false,
