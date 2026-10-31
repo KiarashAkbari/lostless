@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { Suspense, lazy, useEffect, useMemo, useRef } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import type { Feature, LineString } from 'geojson';
@@ -12,7 +12,9 @@ export interface MapApi {
   centerOn: (ll: [number, number], zoom?: number) => void;
 }
 
-interface MapViewProps {
+export type MapStatus = 'loading' | 'ready' | 'error';
+
+export interface MapViewProps {
   theme: Theme;
   pos: GeolocationPosition | null;
   destination: Place | null;
@@ -24,6 +26,43 @@ interface MapViewProps {
   onMapTap: (lngLat: [number, number]) => void;
   /** lets the parent read the map center (fallback origin) and drive zoom/center */
   onMapReady?: (api: MapApi) => void;
+  /** map lifecycle reporting so the UI can show loading / error states */
+  onStatus?: (s: MapStatus, msg?: string) => void;
+}
+
+const RasterMapView = lazy(() => import('./RasterMapView').then((m) => ({ default: m.RasterMapView })));
+
+function MapLoading() {
+  return (
+    <div className="map-container map-loading">
+      <span className="mono">LOADING MAP<span className="dots">…</span></span>
+    </div>
+  );
+}
+
+/**
+ * Picks the renderer: MapLibre (WebGL2) when available, otherwise a lightweight
+ * Leaflet raster fallback so the app still works on old WebViews.
+ */
+function webgl2Supported(): boolean {
+  try {
+    return !!document.createElement('canvas').getContext('webgl2');
+  } catch {
+    return false;
+  }
+}
+
+export function MapView(props: MapViewProps) {
+  // MapLibre v5 needs WebGL2; without it we render the raster fallback instead
+  const supported = useMemo(() => webgl2Supported(), []);
+  if (!supported) {
+    return (
+      <Suspense fallback={<MapLoading />}>
+        <RasterMapView {...props} />
+      </Suspense>
+    );
+  }
+  return <GlMapView {...props} />;
 }
 
 const styleFor = (theme: Theme) => (theme === 'dark' ? CONFIG.map.darkStyleUrl : CONFIG.map.lightStyleUrl);
@@ -32,67 +71,75 @@ const OSM_ATTRIBUTION =
   '<a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap contributors</a>' +
   ' · <a href="https://openfreemap.org" target="_blank" rel="noopener">OpenFreeMap</a>';
 
-export function MapView(props: MapViewProps) {
+function GlMapView(props: MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const meMarkerRef = useRef<maplibregl.Marker | null>(null);
   const destMarkerRef = useRef<maplibregl.Marker | null>(null);
   const styleLoadedRef = useRef(false);
   const lastFollowRef = useRef<[number, number] | null>(null);
+  const errorCountRef = useRef(0);
 
   // latest data for callbacks / style reloads (avoid stale closures)
   const dataRef = useRef({ theme: props.theme, pos: props.pos, destination: props.destination, route: props.route, remaining: props.remainingCoords, navigating: props.navigating });
   dataRef.current = { theme: props.theme, pos: props.pos, destination: props.destination, route: props.route, remaining: props.remainingCoords, navigating: props.navigating };
   const onTapRef = useRef(props.onMapTap);
   onTapRef.current = props.onMapTap;
+  const onStatusRef = useRef(props.onStatus);
+  onStatusRef.current = props.onStatus;
 
   const syncDynamic = () => {
     const map = mapRef.current;
     if (!map || !styleLoadedRef.current || !map.isStyleLoaded()) return;
-    const { theme, route, remaining, navigating } = dataRef.current;
+    const { route, remaining, navigating } = dataRef.current;
     const accent = getCssVar('--accent');
     const routeColor = getCssVar('--route-muted');
 
-    const ensure = () => {
-      if (!map.getSource('route-full')) {
-        map.addSource('route-full', { type: 'geojson', data: emptyLine });
-        map.addSource('route-rest', { type: 'geojson', data: emptyLine });
-        map.addLayer({
-          id: 'route-full-line', type: 'line', source: 'route-full',
-          layout: { 'line-join': 'round', 'line-cap': 'round' },
-          paint: { 'line-color': navigating ? routeColor : accent, 'line-width': 6, 'line-opacity': navigating ? 0.45 : 1 },
-        });
-        map.addLayer({
-          id: 'route-rest-line', type: 'line', source: 'route-rest',
-          layout: { 'line-join': 'round', 'line-cap': 'round' },
-          paint: { 'line-color': accent, 'line-width': 6 },
-        });
-      }
-    };
-    ensure();
+    if (!map.getSource('route-full')) {
+      map.addSource('route-full', { type: 'geojson', data: emptyLine });
+      map.addSource('route-rest', { type: 'geojson', data: emptyLine });
+      map.addLayer({
+        id: 'route-full-line', type: 'line', source: 'route-full',
+        layout: { 'line-join': 'round', 'line-cap': 'round' },
+        paint: { 'line-color': navigating ? routeColor : accent, 'line-width': 6, 'line-opacity': navigating ? 0.45 : 1 },
+      });
+      map.addLayer({
+        id: 'route-rest-line', type: 'line', source: 'route-rest',
+        layout: { 'line-join': 'round', 'line-cap': 'round' },
+        paint: { 'line-color': accent, 'line-width': 6 },
+      });
+    }
     const full = route?.coords?.length ? lineFeature(route.coords) : emptyLine;
     const rest = navigating && remaining?.length ? lineFeature(remaining) : emptyLine;
-    (map.getSource('route-full') as maplibregl.GeoJSONSource).setData(full);
-    (map.getSource('route-rest') as maplibregl.GeoJSONSource).setData(rest);
-    // re-paint in case the theme flipped
+    const srcFull = map.getSource('route-full') as maplibregl.GeoJSONSource | undefined;
+    const srcRest = map.getSource('route-rest') as maplibregl.GeoJSONSource | undefined;
+    if (!srcFull || !srcRest) return; // style not ready yet — style.load will re-sync
+    srcFull.setData(full);
+    srcRest.setData(rest);
     if (map.getLayer('route-full-line')) {
       map.setPaintProperty('route-full-line', 'line-color', navigating ? routeColor : accent);
     }
-    void theme;
   };
 
   // init map once
   useEffect(() => {
     if (!containerRef.current) return;
-    const map = new maplibregl.Map({
-      container: containerRef.current,
-      style: styleFor(dataRef.current.theme),
-      center: CONFIG.map.initialCenter,
-      zoom: CONFIG.map.initialZoom,
-      attributionControl: false,
-      maxPitch: 65,
-      dragRotate: false,
-    });
+    onStatusRef.current?.('loading');
+    let map: maplibregl.Map;
+    try {
+      map = new maplibregl.Map({
+        container: containerRef.current,
+        style: styleFor(dataRef.current.theme),
+        center: CONFIG.map.initialCenter,
+        zoom: CONFIG.map.initialZoom,
+        attributionControl: false,
+        maxPitch: 65,
+        dragRotate: false,
+      });
+    } catch (err) {
+      onStatusRef.current?.('error', err instanceof Error ? err.message : 'WebGL init failed');
+      return;
+    }
     map.addControl(
       new maplibregl.AttributionControl({ compact: true, customAttribution: OSM_ATTRIBUTION }),
       'bottom-right',
@@ -101,10 +148,18 @@ export function MapView(props: MapViewProps) {
     map.on('load', () => {
       styleLoadedRef.current = true;
       syncDynamic();
+      onStatusRef.current?.('ready');
     });
     map.on('style.load', () => {
       styleLoadedRef.current = true;
       syncDynamic();
+    });
+    map.on('error', (e) => {
+      // surface real map failures (style/tiles/WebGL) instead of a silent blank map
+      if (errorCountRef.current++ < 3) {
+        const msg = (e as { error?: { message?: string } }).error?.message ?? 'map error';
+        onStatusRef.current?.('error', msg);
+      }
     });
 
     // tap = drop destination pin, but ignore taps that were actually drags
@@ -139,8 +194,8 @@ export function MapView(props: MapViewProps) {
         const c = map.getCenter();
         return [c.lng, c.lat];
       },
-      zoomBy: (d) => map.zoomTo(map.getZoom() + d),
-      centerOn: (ll, zoom) => {
+      zoomBy: (d: number) => map.zoomTo(map.getZoom() + d),
+      centerOn: (ll: [number, number], zoom?: number) => {
         const z = zoom ?? Math.max(map.getZoom(), CONFIG.map.minFollowZoom);
         if (reduced()) map.jumpTo({ center: ll, zoom: z });
         else map.easeTo({ center: ll, zoom: z, duration: 500 });
@@ -202,7 +257,7 @@ export function MapView(props: MapViewProps) {
     const last = lastFollowRef.current;
     if (last) {
       const moved = Math.hypot((longitude - last[0]) * 111320 * Math.cos((latitude * Math.PI) / 180), (latitude - last[1]) * 110540);
-      if (moved < 4 && Math.abs(map.getZoom() - Math.max(map.getZoom(), CONFIG.map.navigationZoom)) < 0.01) return;
+      if (moved < 4) return;
     }
     lastFollowRef.current = [longitude, latitude];
     const bearing = heading !== null && !Number.isNaN(heading) ? heading : map.getBearing();

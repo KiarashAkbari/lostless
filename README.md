@@ -34,7 +34,14 @@ npm run preview    # serve dist/ locally
 ```
 
 CI runs `npm ci && npm test && npm run build` on every pull request and push to
-`main` (`.github/workflows/ci.yml`) — a red check means don't merge.
+`main` (`.github/workflows/ci.yml`) — a red check means don't merge. The suite
+includes a jsdom smoke test that drives the whole flow (search → pick → route →
+START → STOP, map-tap → pin, GPS-denied banner) with a mocked map/network.
+
+**Performance:** the map library is lazy-loaded, so the initial JS is ~57 kB gzip
+(the ~290 kB gzip MapLibre chunk loads in parallel); `preconnect`/`dns-prefetch`
+hints warm up the tile/geocoding/routing hosts; the service worker precaches the
+app shell and caches map tiles.
 
 ## Deploy for free
 
