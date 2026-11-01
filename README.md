@@ -62,7 +62,8 @@ The app is wrapped with [Capacitor](https://capacitorjs.com/) (`android/` projec
 `capacitor.config.ts`, app id `app.lostless.nav`). A workflow
 (`.github/workflows/apk.yml`) builds the APK on GitHub-hosted runners (Android SDK
 preinstalled) on every push to `main` and on manual runs, then publishes it to the
-**`apk-latest` GitHub Release** → `https://github.com/KiarashAkbari/lostless/releases`.
+**`apk-latest` GitHub Release** → `https://github.com/KiarashAkbari/lostless/releases`
+(direct download: `https://github.com/KiarashAkbari/lostless/releases/download/apk-latest/lostless.apk`).
 
 - Download `lostless.apk` from the release, allow "Install unknown apps" for your
   browser/file manager, open it. First GPS use asks for the location permission
