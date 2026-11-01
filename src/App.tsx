@@ -311,9 +311,9 @@ export default function App() {
       setDisplayPos(null);
     }
 
-    // speed: GPS-reported, else derived from consecutive fixes
+    // speed: GPS-reported, else derived from consecutive fixes (never NaN)
     const sp = geo.pos.coords.speed;
-    if (sp !== null && !Number.isNaN(sp)) {
+    if (sp !== null && Number.isFinite(sp)) {
       setSpeedKmh(sp * 3.6);
       prevFix.current = null;
     } else {
@@ -322,7 +322,7 @@ export default function App() {
       if (prev && now > prev.t) {
         const d = haversineM(prev.ll, p);
         const dt = (now - prev.t) / 1000;
-        if (dt > 0.5 && dt < 30) setSpeedKmh((d / dt) * 3.6);
+        if (Number.isFinite(d) && dt > 0.5 && dt < 30) setSpeedKmh((d / dt) * 3.6);
       }
       prevFix.current = { ll: p, t: now };
     }

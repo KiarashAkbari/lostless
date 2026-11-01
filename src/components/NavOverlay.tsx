@@ -42,7 +42,7 @@ export function NavOverlay({ step, distToNextM, remainingM, remainingS, speedKmh
         <span>ARRIVE {formatEta(remainingS)}</span>
         <span>{formatDuration(remainingS)}</span>
         <span>{formatDistance(remainingM)} LEFT</span>
-        <span>{speedKmh !== null ? `${Math.round(speedKmh)} KM/H` : '—'}</span>
+        <span>{speedKmh !== null && Number.isFinite(speedKmh) ? `${Math.round(Math.max(0, speedKmh))} KM/H` : '—'}</span>
       </div>
       <button className="btn stop nav-stop mono" onClick={onStop}>■ STOP</button>
     </div>

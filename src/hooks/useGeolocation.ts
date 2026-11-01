@@ -29,21 +29,27 @@ export function useGeolocation(): GeoState {
     if (watchId.current !== null) navigator.geolocation.clearWatch(watchId.current);
     watchId.current = navigator.geolocation.watchPosition(
       (p) => {
-        const { latitude, longitude, accuracy } = p.coords;
+        const c = p.coords;
+        // some WebViews deliver NaN accuracy/speed/heading — never let those through
+        // (Leaflet's L.circle throws "Circle radius cannot be NaN", maplibre rejects NaN lngLat)
+        if (!Number.isFinite(c.latitude) || !Number.isFinite(c.longitude)) return; // ignore broken fix
+        const accuracy = Number.isFinite(c.accuracy) && c.accuracy > 0 ? c.accuracy : 50;
+        const speed = Number.isFinite(c.speed) ? c.speed : null;
+        const heading = Number.isFinite(c.heading) ? c.heading : null;
         const prev = smoothRef.current;
-        let lat = latitude;
-        let lon = longitude;
+        let lat = c.latitude;
+        let lon = c.longitude;
         if (prev) {
-          const moved = haversineM([prev.lon, prev.lat], [longitude, latitude]);
+          const moved = haversineM([prev.lon, prev.lat], [c.longitude, c.latitude]);
           // strong signal + big jump → trust the new fix; weak signal → smooth harder
           const alpha = accuracy > 60 ? 0.8 : moved > 25 ? 0.7 : moved > 3 ? 0.45 : 0.2;
-          lat = prev.lat + (latitude - prev.lat) * alpha;
-          lon = prev.lon + (longitude - prev.lon) * alpha;
+          lat = prev.lat + (c.latitude - prev.lat) * alpha;
+          lon = prev.lon + (c.longitude - prev.lon) * alpha;
         }
         smoothRef.current = { lat, lon };
         const smoothed = {
           ...p,
-          coords: { ...p.coords, latitude: lat, longitude: lon },
+          coords: { ...c, latitude: lat, longitude: lon, accuracy, speed, heading },
         } as GeolocationPosition;
         setPos(smoothed);
         setStatus('ok');

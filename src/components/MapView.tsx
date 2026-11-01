@@ -387,14 +387,16 @@ function GlMapView(props: MapViewProps) {
     const p = props.displayPos ?? props.pos;
     if (!p) return;
     const ll: [number, number] = [p.coords.longitude, p.coords.latitude];
+    if (!Number.isFinite(ll[0]) || !Number.isFinite(ll[1])) return; // never feed NaN to maplibre
     marker.setLngLat(ll).addTo(map);
     if (styleLoadedRef.current && map.isStyleLoaded()) {
       const src = map.getSource('me-accuracy') as maplibregl.GeoJSONSource | undefined;
+      const acc = Number.isFinite(p.coords.accuracy) && p.coords.accuracy > 0 ? p.coords.accuracy : 25;
       if (src) {
         src.setData({
           type: 'Feature',
           properties: {},
-          geometry: { type: 'Polygon', coordinates: [circlePolygon(ll, Math.max(5, p.coords.accuracy))] },
+          geometry: { type: 'Polygon', coordinates: [circlePolygon(ll, acc)] },
         });
       }
     }
@@ -406,7 +408,7 @@ function GlMapView(props: MapViewProps) {
     const marker = destMarkerRef.current;
     const map = mapRef.current;
     if (!marker || !map) return;
-    if (props.destination) {
+    if (props.destination && Number.isFinite(props.destination.lon) && Number.isFinite(props.destination.lat)) {
       marker.setLngLat([props.destination.lon, props.destination.lat]).addTo(map);
     } else {
       marker.remove();
@@ -421,6 +423,7 @@ function GlMapView(props: MapViewProps) {
     const p = props.displayPos ?? props.pos;
     if (!p) return;
     const { longitude, latitude, heading } = p.coords;
+    if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) return;
     const last = lastFollowRef.current;
     if (last) {
       const moved = Math.hypot((longitude - last[0]) * 111320 * Math.cos((latitude * Math.PI) / 180), (latitude - last[1]) * 110540);
