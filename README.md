@@ -56,6 +56,30 @@ preview (`*.e2b.app`) all external calls go through same-origin `/proxy/*` paths
 vite forwards, and the MapLibre worker is served same-origin so a strict CSP can't blank
 the map.
 
+## Android APK (installable from GitHub Releases)
+
+The app is wrapped with [Capacitor](https://capacitorjs.com/) (`android/` project,
+`capacitor.config.ts`, app id `app.lostless.nav`). A workflow
+(`.github/workflows/apk.yml`) builds the APK on GitHub-hosted runners (Android SDK
+preinstalled) on every push to `main` and on manual runs, then publishes it to the
+**`apk-latest` GitHub Release** → `https://github.com/KiarashAkbari/lostless/releases`.
+
+- Download `lostless.apk` from the release, allow "Install unknown apps" for your
+  browser/file manager, open it. First GPS use asks for the location permission
+  (`ACCESS_FINE_LOCATION` is declared in the manifest).
+- No secrets needed: without keystore secrets the workflow builds the auto-signed
+  **debug APK** (sideload). To get a signed release APK (e.g. for Play later), add
+  repo secrets `ANDROID_KEYSTORE_B64` (base64 keystore), `ANDROID_KEYSTORE_PASSWORD`,
+  `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD` — signing is wired in
+  `android/app/build.gradle` from those env vars.
+- Build locally: `npm run apk:debug` (or `npm run apk` for release) — needs the
+  Android SDK + JDK 17; then open `android/` in Android Studio.
+- The APK loads the same free build from `https://localhost` (secure context → GPS
+  works) and uses the direct free service URLs from `src/config.ts`.
+
+Note: publishing to the Play Store requires a one-time $25 Play Console fee — that's
+Google's, not ours; the sideload APK above is completely free.
+
 ## Deploy for free
 
 ### Option A — GitHub Pages (already wired up)

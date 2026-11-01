@@ -1,0 +1,107 @@
+name: apk
+
+# Builds the Android APK from the PWA build (dist/) via Capacitor and
+# publishes it to the "apk-latest" GitHub Release (installable download).
+# Runs manually (Actions tab -> apk -> Run workflow) and on every push to
+# main that touches the app.
+#
+# Release signing: add repo secrets ANDROID_KEYSTORE_B64, ANDROID_KEYSTORE_PASSWORD,
+# ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD to get a signed release APK.
+# Without them we build the auto-signed debug APK (sideload-installable).
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'public/**'
+      - 'index.html'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'vite.config.ts'
+      - 'capacitor.config.ts'
+      - 'android/**'
+      - '.github/workflows/apk.yml'
+
+permissions:
+  contents: write # create/update the apk-latest release
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Install Android SDK packages
+        run: |
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" "platform-tools"
+
+      - name: Build web app
+        run: |
+          npm ci
+          npm run build
+
+      - name: Sync Capacitor android project
+        run: npx cap sync android
+
+      - name: Decode release keystore (if secrets are set)
+        if: ${{ secrets.ANDROID_KEYSTORE_B64 != '' }}
+        env:
+          ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+        run: |
+          echo "$ANDROID_KEYSTORE_B64" | base64 -d > android/app/keystore.jks
+          echo "ANDROID_KEYSTORE_PATH=$PWD/android/app/keystore.jks" >> "$GITHUB_ENV"
+          echo "ANDROID_KEYSTORE_PASSWORD=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" >> "$GITHUB_ENV"
+          echo "ANDROID_KEY_ALIAS=${{ secrets.ANDROID_KEY_ALIAS }}" >> "$GITHUB_ENV"
+          echo "ANDROID_KEY_PASSWORD=${{ secrets.ANDROID_KEY_PASSWORD }}" >> "$GITHUB_ENV"
+
+      - name: Build APK (release if keystore present, else debug)
+        run: |
+          cd android
+          if [ -n "$ANDROID_KEYSTORE_PATH" ] && [ -f "$ANDROID_KEYSTORE_PATH" ]; then
+            ./gradlew assembleRelease --no-daemon
+          else
+            ./gradlew assembleDebug --no-daemon
+          fi
+
+      - name: Collect APK
+        id: apk
+        run: |
+          APK_PATH=$(find android/app/build/outputs/apk -name '*.apk' | head -1)
+          echo "path=$APK_PATH" >> "$GITHUB_OUTPUT"
+          cp "$APK_PATH" lostless.apk
+          ls -la lostless.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lostless-apk
+          path: lostless.apk
+          retention-days: 30
+
+      - name: Publish to GitHub Release (apk-latest) on main
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APK: ${{ steps.apk.outputs.path }}
+        run: |
+          SHORT=$(git rev-parse --short HEAD)
+          NOTES="lostless_ Android APK — built from main @ ${SHORT} on $(date -u +%Y-%m-%d\ %H:%M UTC).\n\nInstall: download the APK, allow \"Install unknown apps\" for your browser/file manager, open it. First GPS use asks for the location permission. 100% free stack (OpenFreeMap tiles, Nominatim, public Valhalla/OSRM) — no keys. Web version: https://kiarashakbari.github.io/lostless/"
+          if gh release view apk-latest >/dev/null 2>&1; then
+            gh release upload apk-latest lostless.apk --clobber
+            gh release edit apk-latest --notes "$NOTES"
+          else
+            gh release create apk-latest lostless.apk --title "lostless_ — Android APK (apk-latest)" --notes "$NOTES"
+          fi
+          gh release view apk-latest --json assets --jq '.assets[].name'
