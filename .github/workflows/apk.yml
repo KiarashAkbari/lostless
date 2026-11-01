@@ -101,6 +101,10 @@ jobs:
               tail -80 /tmp/gradle.log
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
+            # surface the error in check-run annotations (readable via api.github.com)
+            echo "::error::gradle $TASK failed rc=$rc java=$(java -version 2>&1 | head -1)"
+            grep -E "FAILURE|What went wrong|error:|Exception|Caused by" /tmp/gradle.log | tail -12 | while IFS= read -r l; do echo "::error::$l"; done
+            tail -20 /tmp/gradle.log | while IFS= read -r l; do echo "::error::$l"; done
           fi
           exit "$rc"
 
