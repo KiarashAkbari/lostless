@@ -82,17 +82,20 @@ export function RasterMapView(props: MapViewProps) {
     const map = mapRef.current;
     const p = props.displayPos ?? props.pos;
     if (!map || !p) return;
-    const { latitude, longitude, accuracy } = p.coords;
+    const { latitude, longitude } = p.coords;
+    // L.circle throws "Circle radius cannot be NaN" on a bad accuracy — clamp it
+    const acc = Number.isFinite(p.coords.accuracy) && p.coords.accuracy > 0 ? Math.min(p.coords.accuracy, 100000) : 30;
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
     if (!meRef.current) {
       meRef.current = L.circleMarker([latitude, longitude], {
         radius: 7, color: '#0b0d0e', weight: 2, fillColor: '#c8ff2e', fillOpacity: 1,
       }).addTo(map);
       accRef.current = L.circle([latitude, longitude], {
-        radius: accuracy, color: '#c8ff2e', weight: 1, fillColor: '#c8ff2e', fillOpacity: 0.08,
+        radius: acc, color: '#c8ff2e', weight: 1, fillColor: '#c8ff2e', fillOpacity: 0.08,
       }).addTo(map);
     } else {
       meRef.current.setLatLng([latitude, longitude]);
-      accRef.current?.setLatLng([latitude, longitude]).setRadius(accuracy);
+      accRef.current?.setLatLng([latitude, longitude]).setRadius(acc);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.pos, props.displayPos]);
@@ -101,7 +104,7 @@ export function RasterMapView(props: MapViewProps) {
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-    if (props.destination) {
+    if (props.destination && Number.isFinite(props.destination.lon) && Number.isFinite(props.destination.lat)) {
       if (!destRef.current) {
         destRef.current = L.marker(toLatLng([props.destination.lon, props.destination.lat]), {
           icon: L.divIcon({ className: 'dest-marker-wrap', html: '<div class="dest-marker"></div>', iconSize: [18, 18], iconAnchor: [9, 9] }),

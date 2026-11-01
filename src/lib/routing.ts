@@ -72,20 +72,23 @@ function parseValhalla(data: ValhallaResponse): RouteResult {
   }
   const leg = data.trip.legs[0];
   const coords = decodePolyline(leg.shape); // [lon, lat]
+  if (coords.length < 2) throw new Error('valhalla: route shape is empty/invalid');
   const steps: RouteStep[] = (leg.maneuvers ?? []).map((m) => ({
-    instruction: stripTags(m.instruction),
+    instruction: stripTags(m.instruction ?? ''),
     street: (m.street_names ?? []).join(', '),
-    distanceM: ((m.length ?? m.distance ?? 0) as number) * 1000,
-    durationS: m.time,
+    distanceM: Math.max(0, ((m.length ?? m.distance ?? 0) as number) * 1000) || 0,
+    durationS: Number.isFinite(m.time) ? m.time : 0,
     type: valhallaTypeName(m.type),
     modifier: m.modifier,
-    location: coords[Math.min(m.begin_shape_index, coords.length - 1)] ?? [0, 0],
+    location: coords[Math.min(Math.max(0, m.begin_shape_index ?? 0), coords.length - 1)],
   }));
+  const sumLen = data.trip.summary?.length;
+  const sumTime = data.trip.summary?.time;
   return {
     coords,
     steps,
-    distanceM: (data.trip.summary?.length ?? 0) * 1000,
-    durationS: data.trip.summary?.time ?? 0,
+    distanceM: Number.isFinite(sumLen) ? (sumLen as number) * 1000 : 0,
+    durationS: Number.isFinite(sumTime) ? (sumTime as number) : 0,
   };
 }
 
@@ -145,21 +148,27 @@ async function routeOsrm(mode: TravelMode, from: [number, number], to: [number, 
     throw new Error(data.message ? `osrm: ${data.message}` : 'osrm: no route found');
   }
   const r = data.routes[0];
-  const steps: RouteStep[] = r.legs.flatMap((l) =>
+  if (!r.geometry?.coordinates || r.geometry.coordinates.length < 2) throw new Error('osrm: route geometry is empty/invalid');
+  const steps: RouteStep[] = (r.legs ?? []).flatMap((l) =>
     l.steps.map((s) => {
       const label = cap(maneuverLabel({ type: s.maneuver.type, modifier: s.maneuver.modifier }));
       return {
         instruction: s.name && s.maneuver.type !== 'arrive' ? `${label} onto ${s.name}` : label,
         street: s.name,
-        distanceM: s.distance,
-        durationS: s.duration,
+        distanceM: Number.isFinite(s.distance) ? s.distance : 0,
+        durationS: Number.isFinite(s.duration) ? s.duration : 0,
         type: s.maneuver.type,
         modifier: s.maneuver.modifier,
         location: s.maneuver.location,
       };
     }),
   );
-  return { coords: r.geometry.coordinates, steps, distanceM: r.distance, durationS: r.duration };
+  return {
+    coords: r.geometry.coordinates,
+    steps,
+    distanceM: Number.isFinite(r.distance) ? r.distance : 0,
+    durationS: Number.isFinite(r.duration) ? r.duration : 0,
+  };
 }
 
 export function getRoute(mode: TravelMode, from: [number, number], to: [number, number]): Promise<RouteResult> {

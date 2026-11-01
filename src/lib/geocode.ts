@@ -42,13 +42,17 @@ export async function searchPlaces(query: string): Promise<Place[]> {
     type?: string;
     class?: string;
   }>;
-  return data.map((d) => ({
-    id: String(d.place_id),
-    name: d.display_name,
-    lat: parseFloat(d.lat),
-    lon: parseFloat(d.lon),
-    kind: d.type ?? d.class,
-  }));
+  if (!Array.isArray(data)) return [];
+  return data
+    .map((d) => ({
+      id: String(d.place_id),
+      name: d.display_name ?? '',
+      lat: parseFloat(d.lat),
+      lon: parseFloat(d.lon),
+      kind: d.type ?? d.class,
+    }))
+    // drop results with garbage coordinates — they would crash the map marker
+    .filter((d) => d.name && Number.isFinite(d.lat) && Number.isFinite(d.lon));
 }
 
 /** human-readable name for a tapped map point; falls back to raw coordinates */
