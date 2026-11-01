@@ -8,9 +8,10 @@ name: apk
 # Release signing: add repo secrets ANDROID_KEYSTORE_B64, ANDROID_KEYSTORE_PASSWORD,
 # ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD to get a signed release APK.
 # Without them we build the auto-signed debug APK (sideload-installable).
+# NOTE: never reference `secrets` in a step `if:` — that makes the whole
+# workflow invalid (GitHub rejects it with zero jobs). Check in shell instead.
 
 on:
-  workflow_dispatch:
   push:
     branches: [main]
     paths:
@@ -23,6 +24,7 @@ on:
       - 'capacitor.config.ts'
       - 'android/**'
       - '.github/workflows/apk.yml'
+  workflow_dispatch:
 
 permissions:
   contents: write # create/update the apk-latest release
@@ -56,16 +58,22 @@ jobs:
       - name: Sync Capacitor android project
         run: npx cap sync android
 
-      - name: Decode release keystore (if secrets are set)
-        if: ${{ secrets.ANDROID_KEYSTORE_B64 != '' }}
+      - name: Decode release keystore (if secret is set)
         env:
           ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
+          if [ -z "$ANDROID_KEYSTORE_B64" ]; then
+            echo "no ANDROID_KEYSTORE_B64 secret -> debug (auto-signed) APK"
+            exit 0
+          fi
           echo "$ANDROID_KEYSTORE_B64" | base64 -d > android/app/keystore.jks
           echo "ANDROID_KEYSTORE_PATH=$PWD/android/app/keystore.jks" >> "$GITHUB_ENV"
-          echo "ANDROID_KEYSTORE_PASSWORD=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" >> "$GITHUB_ENV"
-          echo "ANDROID_KEY_ALIAS=${{ secrets.ANDROID_KEY_ALIAS }}" >> "$GITHUB_ENV"
-          echo "ANDROID_KEY_PASSWORD=${{ secrets.ANDROID_KEY_PASSWORD }}" >> "$GITHUB_ENV"
+          echo "ANDROID_KEYSTORE_PASSWORD=$ANDROID_KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+          echo "ANDROID_KEY_ALIAS=$ANDROID_KEY_ALIAS" >> "$GITHUB_ENV"
+          echo "ANDROID_KEY_PASSWORD=$ANDROID_KEY_PASSWORD" >> "$GITHUB_ENV"
 
       - name: Build APK (release if keystore present, else debug)
         run: |
@@ -94,14 +102,20 @@ jobs:
         if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          APK: ${{ steps.apk.outputs.path }}
         run: |
           SHORT=$(git rev-parse --short HEAD)
-          NOTES="lostless_ Android APK — built from main @ ${SHORT} on $(date -u +%Y-%m-%d\ %H:%M UTC).\n\nInstall: download the APK, allow \"Install unknown apps\" for your browser/file manager, open it. First GPS use asks for the location permission. 100% free stack (OpenFreeMap tiles, Nominatim, public Valhalla/OSRM) — no keys. Web version: https://kiarashakbari.github.io/lostless/"
+          {
+            echo "lostless_ Android APK - built from main @ ${SHORT} on $(date -u +%Y-%m-%d) UTC."
+            echo ""
+            echo "Install: download the APK, allow 'Install unknown apps' for your browser or file manager, then open it."
+            echo "First GPS use asks for the location permission."
+            echo "100% free stack (OpenFreeMap tiles, Nominatim search, public Valhalla/OSRM routing), no API keys."
+            echo "Web version: https://kiarashakbari.github.io/lostless/"
+          } > /tmp/notes.md
           if gh release view apk-latest >/dev/null 2>&1; then
             gh release upload apk-latest lostless.apk --clobber
-            gh release edit apk-latest --notes "$NOTES"
+            gh release edit apk-latest --notes-file /tmp/notes.md
           else
-            gh release create apk-latest lostless.apk --title "lostless_ — Android APK (apk-latest)" --notes "$NOTES"
+            gh release create apk-latest lostless.apk --title "lostless_ Android APK (apk-latest)" --notes-file /tmp/notes.md
           fi
           gh release view apk-latest --json assets --jq '.assets[].name'
