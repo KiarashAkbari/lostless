@@ -108,6 +108,27 @@ jobs:
           fi
           exit "$rc"
 
+      # On build failure, push the gradle log to the ci-logs branch so it can be
+      # read via api.github.com (the job-log download host is not allowlisted).
+      - name: Dump build log to ci-logs branch (on failure)
+        if: failure()
+        run: |
+          mkdir -p ci-logs
+          {
+            echo "run=$GITHUB_RUN_ID attempt=$GITHUB_RUN_ATTEMPT"
+            java -version 2>&1 | head -1
+            echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+            echo "platforms: $(ls "${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}/platforms" 2>/dev/null | tr '\n' ' ')"
+            echo "build-tools: $(ls "${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}/build-tools" 2>/dev/null | tr '\n' ' ')"
+            echo "cmdline-tools: $(ls "${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}/cmdline-tools" 2>/dev/null | tr '\n' ' ')"
+          } > "ci-logs/head-$GITHUB_RUN_ID.txt"
+          cp /tmp/gradle.log "ci-logs/gradle-$GITHUB_RUN_ID.log" 2>/dev/null || echo "no gradle log captured" > "ci-logs/gradle-$GITHUB_RUN_ID.log"
+          git config user.email "ci@lostless.app" && git config user.name "lostless-ci"
+          git checkout -B ci-logs
+          git add ci-logs
+          git commit -m "ci log run $GITHUB_RUN_ID" || true
+          git push -f origin ci-logs || echo "ci-logs push failed"
+
       - name: Collect APK
         id: apk
         run: |
