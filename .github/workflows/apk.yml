@@ -43,7 +43,9 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 17
+          # Capacitor 8's android library targets Java 21; JDK 17 fails with
+          # "invalid source release: 21" at :capacitor-android:compileDebugJavaWithJavac
+          java-version: 21
 
       - name: Install Android SDK packages
         run: |
