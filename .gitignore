@@ -3,3 +3,13 @@ dist/
 *.local
 *.tsbuildinfo
 .DS_Store
+
+# android build outputs + signing material (never commit keys)
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/captures/
+*.keystore
+*.jks
+*.apk
