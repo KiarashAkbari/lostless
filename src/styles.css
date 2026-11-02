@@ -189,8 +189,20 @@ button:disabled { opacity: 0.45; cursor: default; transform: none; }
   overflow: hidden;
   background: var(--bg);
 }
-.map-wrap { position: absolute; inset: 0; z-index: 0; }
+/* the map paints on its own isolated plane at the very bottom; every control
+   below lives in the app's stacking context with an explicit z-index, so the
+   WebGL canvas can never rise above the UI (that bug is why panels used to
+   disappear under the map) */
+.map-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  isolation: isolate;
+  contain: paint;
+  overflow: hidden;
+}
 .map-container { position: absolute; inset: 0; }
+.maplibregl-canvas-container, .maplibregl-canvas { z-index: 0 !important; }
 .map-container canvas { outline: none; }
 /* no CSS filter on the canvas: the basemap palette is built in (lib/mapStyle),
    so the GPU is never asked for a full-screen pass while you drag */
@@ -251,6 +263,9 @@ button:disabled { opacity: 0.45; cursor: default; transform: none; }
   transform: rotate(-45deg);
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.55);
 }
+
+/* stacking planes: map 0 · map buttons 15 · top bar 20 · nav card 22 ·
+   sheet 30 · banners 40 · scrim 60 */
 
 /* ── top bar ─────────────────────────────────────────────────────────────── */
 .topbar {
@@ -327,7 +342,7 @@ button:disabled { opacity: 0.45; cursor: default; transform: none; }
 .nav-overlay {
   position: absolute; top: calc(env(safe-area-inset-top) + 64px); left: 50%;
   transform: translateX(-50%);
-  z-index: 20;
+  z-index: 22;
   width: min(calc(100vw - 28px), 420px);
   border-radius: var(--r-lg);
   padding: 15px 16px 13px;
@@ -377,6 +392,7 @@ button:disabled { opacity: 0.45; cursor: default; transform: none; }
 /* ── bottom sheet: a floating glass card, inset from every edge ──────────── */
 .sheet {
   position: absolute;
+  max-height: calc(100% - 2 * var(--edge) - 72px);
   left: 50%; transform: translateX(-50%);
   bottom: calc(var(--edge) + env(safe-area-inset-bottom));
   width: min(calc(100% - 2 * var(--edge)), 560px);

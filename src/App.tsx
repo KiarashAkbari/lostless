@@ -1,5 +1,5 @@
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
-import { CONFIG, type TravelMode } from './config';
+import { CONFIG, previewProxied, type TravelMode } from './config';
 import type { Place, RouteResult, Settings, SheetSnap } from './types';
 import { useGeolocation } from './hooks/useGeolocation';
 import { useTheme } from './hooks/useTheme';
@@ -75,8 +75,10 @@ export default function App() {
   const [displayPos, setDisplayPos] = useState<GeolocationPosition | null>(null); // dot position (snapped to route while navigating)
   const [speedKmh, setSpeedKmh] = useState<number | null>(null);
   const autoRasterTried = useRef(false);
+  // raster fallback triggered by a failed map load — this session only, never saved
+  const [fallbackRaster, setFallbackRaster] = useState(false);
   const prevFix = useRef<{ ll: [number, number]; t: number } | null>(null);
-  const forceRaster = settings.perf;
+  const forceRaster = settings.perf || fallbackRaster;
 
   const updateSettings = useCallback((s: Settings) => {
     setSettingsState(s);
@@ -429,47 +431,55 @@ export default function App() {
   const onMapStatus = useCallback(
     (s: MapStatus, msg?: string) => {
       if (s === 'error') {
-        // the GL map failed (blank) — fall back to the raster map automatically, once
+        const inPreview = previewProxied();
+        // the GL map failed (blank) — fall back to the raster map for THIS
+        // session. Persisting it would quietly downgrade the app forever.
         if (!forceRaster && !autoRasterTried.current) {
           autoRasterTried.current = true;
-          updateSettings({ ...settings, perf: true });
+          setFallbackRaster(true);
           setMapKey((k) => k + 1);
-          pushBanner('info', `The 3D map isn't available (${msg ?? 'unknown reason'}). Showing the simple map instead.`, {
-            tag: 'map',
-            sticky: true,
-            action: {
-              label: 'Try again',
-              onClick: () => {
-                autoRasterTried.current = false;
-                updateSettings({ ...settings, perf: false });
+          pushBanner(
+            'info',
+            inPreview
+              ? "This preview window can't reach the map servers. Open the deployed app to see the map."
+              : `The 3D map didn't load (${msg ?? 'unknown reason'}). Showing the simple map for now.`,
+            {
+              tag: 'map',
+              sticky: true,
+              action: inPreview
+                ? { label: 'Open app', onClick: () => window.open('https://kiarashakbari.github.io/lostless/', '_blank', 'noopener') }
+                : {
+                    label: 'Try again',
+                    onClick: () => {
+                      autoRasterTried.current = false;
+                      setFallbackRaster(false);
                       setMapKey((k) => k + 1);
-              },
+                    },
+                  },
             },
-          });
+          );
           return;
         }
-        pushBanner('error', `The map didn't load (${msg ?? 'unknown reason'}). Check your connection and try again.`, {
+        pushBanner('error', inPreview
+          ? "This preview window can't reach the map servers. Open the deployed app to see the map."
+          : `The map didn't load (${msg ?? 'unknown reason'}). Check your connection and try again.`, {
           tag: 'map',
           sticky: true,
-          action: {
-            label: 'Try again',
-            onClick: () => {
+          action: inPreview
+            ? { label: 'Open app', onClick: () => window.open('https://kiarashakbari.github.io/lostless/', '_blank', 'noopener') }
+            : {
+                label: 'Try again',
+                onClick: () => {
+                  setFallbackRaster(false);
                   setMapKey((k) => k + 1);
-            },
-          },
-          action2: {
-            label: 'Use simple map',
-            onClick: () => {
-              updateSettings({ ...settings, perf: true });
-                  setMapKey((k) => k + 1);
-            },
-          },
+                },
+              },
         });
       } else {
         clearTags('map');
       }
     },
-    [pushBanner, clearTags, forceRaster, settings, updateSettings],
+    [pushBanner, clearTags, forceRaster],
   );
 
   // ── render ─────────────────────────────────────────────────────────────────
@@ -585,7 +595,9 @@ export default function App() {
 
   return (
     <div className={`app${settings.perf ? ' perf' : ''}`}>
-      <div className="map-wrap">
+      {/* the map is its own isolated layer, under EVERYTHING: no UI element can
+          ever end up beneath the canvas, whatever z-index the map injects */}
+      <div className="map-layer">
         <ErrorBoundary>
           <Suspense
             fallback={
@@ -618,65 +630,65 @@ export default function App() {
             />
           </Suspense>
         </ErrorBoundary>
-
-        <TopBar
-          theme={theme}
-          onToggleTheme={toggleTheme}
-          onOpenSidebar={() => setSidebarOpen(true)}
-          gpsStatus={geo.status}
-          onGpsRetry={geo.retry}
-          online={online}
-          coords={geo.pos ? geo.pos.coords : null}
-        />
-
-        <div className="banners">
-          {banners.map((b) => (
-            <div key={b.id} className={`banner ${b.kind}`} role={b.kind === 'error' ? 'alert' : 'status'}>
-              <span className="b-msg">{b.msg}</span>
-              {b.action && (
-                <button className="mini-btn" onClick={b.action.onClick}>
-                  {b.action.label}
-                </button>
-              )}
-              {b.action2 && (
-                <button className="mini-btn" onClick={b.action2.onClick}>
-                  {b.action2.label}
-                </button>
-              )}
-              <button className="icon-btn b-x" onClick={() => dismissBanner(b.id)} aria-label="dismiss">
-                ×
-              </button>
-            </div>
-          ))}
-        </div>
-
-        {navigating && nav && route && (
-          <NavOverlay
-            step={route.steps[nav.stepIndex]}
-            distToNextM={nav.distToNextM}
-            remainingM={nav.remainingM}
-            remainingS={nav.remainingS}
-            speedKmh={speedKmh}
-            progress={route.distanceM > 0 ? 1 - nav.remainingM / route.distanceM : 0}
-            mode={mode}
-            onStop={stopNav}
-          />
-        )}
-
-        <MapButtons
-          follow={follow}
-          navigating={navigating}
-          onZoomIn={() => mapApi.current?.zoomBy(1)}
-          onZoomOut={() => mapApi.current?.zoomBy(-1)}
-          onRecenter={recenter}
-        />
-
-        {snap === 'hidden' && !navigating && (
-          <button className="fab" onClick={() => setSnap('peek')}>
-            Search
-          </button>
-        )}
       </div>
+
+      <TopBar
+        theme={theme}
+        onToggleTheme={toggleTheme}
+        onOpenSidebar={() => setSidebarOpen(true)}
+        gpsStatus={geo.status}
+        onGpsRetry={geo.retry}
+        online={online}
+        coords={geo.pos ? geo.pos.coords : null}
+      />
+
+      <div className="banners">
+        {banners.map((b) => (
+          <div key={b.id} className={`banner ${b.kind}`} role={b.kind === 'error' ? 'alert' : 'status'}>
+            <span className="b-msg">{b.msg}</span>
+            {b.action && (
+              <button className="mini-btn" onClick={b.action.onClick}>
+                {b.action.label}
+              </button>
+            )}
+            {b.action2 && (
+              <button className="mini-btn" onClick={b.action2.onClick}>
+                {b.action2.label}
+              </button>
+            )}
+            <button className="icon-btn b-x" onClick={() => dismissBanner(b.id)} aria-label="dismiss">
+              ×
+            </button>
+          </div>
+        ))}
+      </div>
+
+      {navigating && nav && route && (
+        <NavOverlay
+          step={route.steps[nav.stepIndex]}
+          distToNextM={nav.distToNextM}
+          remainingM={nav.remainingM}
+          remainingS={nav.remainingS}
+          speedKmh={speedKmh}
+          progress={route.distanceM > 0 ? 1 - nav.remainingM / route.distanceM : 0}
+          mode={mode}
+          onStop={stopNav}
+        />
+      )}
+
+      <MapButtons
+        follow={follow}
+        navigating={navigating}
+        onZoomIn={() => mapApi.current?.zoomBy(1)}
+        onZoomOut={() => mapApi.current?.zoomBy(-1)}
+        onRecenter={recenter}
+      />
+
+      {snap === 'hidden' && !navigating && (
+      <button className="fab" onClick={() => setSnap('peek')}>
+        Search
+      </button>
+      )}
 
       <Sheet snap={snap} onSnap={setSnap} peek={peekContent} body={bodyContent} />
 

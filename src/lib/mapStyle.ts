@@ -33,8 +33,10 @@ interface Palette {
   park: string;
   wood: string;
   grass: string;
+  farm: string;
   sand: string;
   water: string;
+  waterLine: string;
   waterway: string;
   boundary: string;
   street: string;
@@ -58,65 +60,71 @@ interface Palette {
 }
 
 const PAPER: Palette = {
-  land: '#f3f2ee',
-  residential: '#eeece7',
-  commercial: '#e8e6e0',
-  park: '#dce5d2',
-  wood: '#d3dfc8',
-  grass: '#e0e8d7',
-  sand: '#f0e9da',
-  water: '#c7d5dc',
-  waterway: '#bfcfd7',
-  boundary: '#cac5ba',
-  street: '#fbfaf7',
-  streetCasing: '#e3dfd6',
+  // warm paper, the way a printed road atlas reads
+  land: '#f6f3ec',
+  residential: '#f1ede4',
+  commercial: '#eee9de',
+  park: '#cfe6c4',
+  wood: '#c3ddb8',
+  grass: '#dfedd4',
+  farm: '#f0eddd',
+  sand: '#f3e8d3',
+  water: '#a8c8e2',
+  waterLine: '#8fb4d4',
+  waterway: '#9dc0dc',
+  boundary: '#c9bfae',
+  street: '#ffffff',
+  streetCasing: '#e2dccf',
   secondary: '#ffffff',
-  secondaryCasing: '#dcd7cd',
-  primary: '#ffffff',
-  primaryCasing: '#d5cfc2',
-  motorway: '#f8ead2',
-  motorwayCasing: '#e0d2b9',
-  path: '#f0eee8',
-  rail: '#d8d4cb',
-  building: '#e6e3dc',
-  buildingEdge: '#d9d5cc',
-  label: '#3f413e',
-  halo: 'rgba(255,255,255,0.94)',
-  waterLabel: '#76858e',
-  poi: '#8a8579',
-  poiFood: '#a5784f',
-  poiShop: '#6f7d6a',
+  secondaryCasing: '#dcd4c4',
+  primary: '#fff6d8',
+  primaryCasing: '#e3d5ac',
+  motorway: '#ffd98a',
+  motorwayCasing: '#dcb45f',
+  path: '#f2eee3',
+  rail: '#cfc8b9',
+  building: '#e7e0d2',
+  buildingEdge: '#dbd2c1',
+  label: '#33352f',
+  halo: 'rgba(255,255,255,0.95)',
+  waterLabel: '#5f7f99',
+  poi: '#8b8578',
+  poiFood: '#b2632f',
+  poiShop: '#6d6fa8',
 };
 
-const SLATE: Palette = {
-  land: '#0f1113',
-  residential: '#131518',
-  commercial: '#15181b',
-  park: '#121a14',
-  wood: '#0f1712',
-  grass: '#121a13',
-  sand: '#1a1814',
-  water: '#141c22',
-  waterway: '#18222a',
-  boundary: '#2a2e33',
-  street: '#23272b',
-  streetCasing: '#0a0c0d',
-  secondary: '#2b3035',
-  secondaryCasing: '#0a0c0d',
-  primary: '#353b42',
-  primaryCasing: '#0b0d0f',
-  motorway: '#474f59',
-  motorwayCasing: '#12151a',
-  path: '#1d2125',
-  rail: '#252932',
-  building: '#181b1e',
-  buildingEdge: '#1e2226',
-  label: '#c3c8cd',
-  halo: 'rgba(9,11,13,0.92)',
-  waterLabel: '#7f909b',
-  poi: '#8f948f',
-  poiFood: '#a98a63',
-  poiShop: '#7d8b77',
+const NIGHT: Palette = {
+  // night driving: near-black ground, road network lifted out of it
+  land: '#0c0f12',
+  residential: '#101418',
+  commercial: '#12171c',
+  park: '#0f1a13',
+  wood: '#0c1710',
+  grass: '#101b13',
+  farm: '#11150f',
+  sand: '#191712',
+  water: '#0b1a26',
+  waterLine: '#16303f',
+  waterway: '#122734',
+  boundary: '#2b3138',
+  street: '#1c2228',
+  streetCasing: '#05070a',
+  secondary: '#262e36',
+  secondaryCasing: '#05070a',
+  primary: '#39434e',
+  primaryCasing: '#06090c',
+  motorway: '#5c5136',
+  motorwayCasing: '#0a0d10',
+  path: '#171c21',
+  rail: '#20262d',
+  building: '#161a1f',
+  buildingEdge: '#1c2127',
+  label: '#ccd3d8',
+  halo: 'rgba(6,9,11,0.94)',
+  waterLabel: '#6f93a8',
+  poi: '#8e9499',
+  poiFood: '#c08a56',
+  poiShop: '#8d8fc0',
 };
 
 /** zoom → value ramp: call with (zoom, value, zoom, value, ...) */
@@ -193,8 +201,16 @@ const POI_LABEL_CLASSES = ['restaurant', 'cafe', 'fast_food', 'bar', 'pub', 'hot
  *  rigid for expression-heavy paint blocks, so cast at the boundary */
 const L = (layer: unknown) => layer as StyleSpecification['layers'][number];
 
-export function buildBaseStyle(theme: BaseTheme): StyleSpecification {
-  const p = theme === 'dark' ? SLATE : PAPER;
+export interface TileBase {
+  /** a TileJSON url, or an already-expanded tile template list */
+  source: { type: 'vector'; url?: string; tiles?: string[]; minzoom?: number; maxzoom?: number };
+  glyphs: string;
+  /** how the tile URLs were resolved (diagnostics only) */
+  via?: 'direct' | 'proxy';
+}
+
+export function buildBaseStyle(theme: BaseTheme, base?: TileBase): StyleSpecification {
+  const p = theme === 'dark' ? NIGHT : PAPER;
   const font = CONFIG.map.fonts.regular;
   const fontBold = CONFIG.map.fonts.bold;
   const fontItalic = CONFIG.map.fonts.italic;
@@ -241,6 +257,15 @@ export function buildBaseStyle(theme: BaseTheme): StyleSpecification {
       paint: { 'fill-color': p.grass, 'fill-opacity': 0.75 },
     },
     {
+      id: 'landcover-farm',
+      type: 'fill',
+      source: 'openmaptiles',
+      'source-layer': 'landcover',
+      minzoom: 9,
+      filter: ['match', ['get', 'class'], ['farmland', 'orchard', 'vineyard'], true, false],
+      paint: { 'fill-color': p.farm, 'fill-opacity': 0.55 },
+    },
+    {
       id: 'landcover-sand',
       type: 'fill',
       source: 'openmaptiles',
@@ -258,6 +283,19 @@ export function buildBaseStyle(theme: BaseTheme): StyleSpecification {
       'source-layer': 'water',
       filter: ['match', ['geometry-type'], ['Polygon', 'MultiPolygon'], true, false],
       paint: { 'fill-color': p.water, 'fill-antialias': false },
+    },
+    {
+      id: 'water-outline',
+      type: 'line',
+      source: 'openmaptiles',
+      'source-layer': 'water',
+      minzoom: 6,
+      filter: ['match', ['geometry-type'], ['Polygon', 'MultiPolygon'], true, false],
+      paint: {
+        'line-color': p.waterLine,
+        'line-width': ramp(6, 0.6, 12, 1.2, 18, 2),
+        'line-opacity': 0.9,
+      },
     },
     {
       id: 'waterway',
@@ -510,7 +548,11 @@ export function buildBaseStyle(theme: BaseTheme): StyleSpecification {
       source: 'openmaptiles',
       'source-layer': 'poi',
       minzoom: 17,
-      filter: ['all', ['<=', ['get', 'rank'], 20], ['match', ['get', 'class'], POI_LABEL_CLASSES, true, false]],
+      filter: [
+        'all',
+        ['any', ['!', ['has', 'rank']], ['<=', ['get', 'rank'], 20]],
+        ['match', ['get', 'class'], POI_LABEL_CLASSES, true, false],
+      ],
       layout: {
         'text-field': ['coalesce', ['get', 'name:en'], ['get', 'name']],
         'text-font': [font],
@@ -528,9 +570,9 @@ export function buildBaseStyle(theme: BaseTheme): StyleSpecification {
     version: 8,
     name: `lostless-${theme}`,
     sources: {
-      openmaptiles: { type: 'vector', url: CONFIG.map.vectorSourceUrl },
+      openmaptiles: base?.source ?? { type: 'vector', url: CONFIG.map.vectorSourceUrl },
     },
-    glyphs: CONFIG.map.glyphsUrl,
+    glyphs: base?.glyphs ?? CONFIG.map.glyphsUrl,
     layers,
   };
 }
