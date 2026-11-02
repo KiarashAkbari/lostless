@@ -34,6 +34,7 @@
   --accent-text: #f4f5f5;
   --accent-soft: rgba(255, 255, 255, 0.1);
   --route-muted: #71767a;
+  --route-casing: rgba(0, 0, 0, 0.55);
   --danger: #ff6f5e;
   --danger-line: rgba(255, 111, 94, 0.45);
   --fav: #e6e1d3;
@@ -76,6 +77,7 @@
   --accent-text: #121314;
   --accent-soft: rgba(0, 0, 0, 0.07);
   --route-muted: #b7bbbe;
+  --route-casing: rgba(255, 255, 255, 0.75);
   --danger: #c43a26;
   --danger-line: rgba(196, 58, 38, 0.42);
   --fav: #8a7a44;
@@ -190,11 +192,8 @@ button:disabled { opacity: 0.45; cursor: default; transform: none; }
 .map-wrap { position: absolute; inset: 0; z-index: 0; }
 .map-container { position: absolute; inset: 0; }
 .map-container canvas { outline: none; }
-/* the stock vector style paints water blue; pull the whole basemap down to
-   matte grey so the app stays black-and-grey. Skipped in lite mode (a
-   full-screen filter costs GPU time on old phones). */
-.map-container.dark:not(.perf) canvas { filter: saturate(0.12) contrast(1.04); }
-.map-container.light:not(.perf) canvas { filter: saturate(0.45); }
+/* no CSS filter on the canvas: the basemap palette is built in (lib/mapStyle),
+   so the GPU is never asked for a full-screen pass while you drag */
 .map-loading { display: grid; place-items: center; background: var(--bg); color: var(--muted); font-size: 14px; }
 
 /* maplibre chrome */
@@ -218,7 +217,7 @@ button:disabled { opacity: 0.45; cursor: default; transform: none; }
 
 /* leaflet fallback chrome */
 .map-container.raster .leaflet-container { background: var(--bg); }
-.map-container.raster.dark .leaflet-tile { filter: invert(1) hue-rotate(180deg) brightness(0.86) contrast(0.94) saturate(0.08); }
+.map-container.raster.dark .leaflet-tile { filter: invert(1) hue-rotate(180deg) brightness(0.84) contrast(0.92) saturate(0.35); }
 .leaflet-control-attribution {
   background: var(--glass-bg-strong) !important;
   color: var(--muted) !important;
@@ -297,7 +296,7 @@ button:disabled { opacity: 0.45; cursor: default; transform: none; }
 
 /* ── banners ─────────────────────────────────────────────────────────────── */
 .banners {
-  position: absolute; top: calc(env(safe-area-inset-top) + 62px); left: 50%;
+  position: absolute; top: calc(env(safe-area-inset-top) + 64px + var(--nav-h, 0px) + 8px); left: 50%;
   transform: translateX(-50%);
   z-index: 40; display: flex; flex-direction: column; gap: 8px;
   width: min(calc(100vw - 28px), 460px);
@@ -336,7 +335,8 @@ button:disabled { opacity: 0.45; cursor: default; transform: none; }
   animation: rise 0.26s var(--spring);
   overflow: hidden;
 }
-.nav-main { display: flex; gap: 12px; align-items: center; position: relative; }
+.nav-overlay > * { position: relative; }
+.nav-main { display: flex; gap: 12px; align-items: center; }
 .nav-glyph { font-size: 30px; line-height: 1; color: var(--accent-text); flex: none; width: 34px; text-align: center; }
 .nav-text { flex: 1; min-width: 0; }
 .nav-in { font-weight: 600; font-size: 18px; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -474,6 +474,8 @@ button:disabled { opacity: 0.45; cursor: default; transform: none; }
 .btn.stop { background: transparent; color: var(--danger); border-color: var(--danger-line); box-shadow: none; }
 
 /* list rows */
+.body-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 2px 0 4px; }
+.body-head .body-label { margin: 0; }
 .body-label { font-size: 12px; font-weight: 600; letter-spacing: 0.04em; color: var(--faint); margin: 4px 0 8px; }
 .body-note { font-size: 13.5px; padding: 6px 0; }
 .footer-note { line-height: 1.6; margin-top: 16px; font-size: 11.5px; opacity: 1; color: var(--faint); }

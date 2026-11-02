@@ -51,6 +51,7 @@ export default function App() {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<Place[]>([]);
   const [searchStatus, setSearchStatus] = useState<SearchStatus>('idle');
+  const [emptySearch, setEmptySearch] = useState(''); // last query that found nothing
   const [favorites, setFavorites] = useState<Place[]>(() => getFavorites());
   const [nav, setNav] = useState<NavState | null>(null);
   const [remainingCoords, setRemainingCoords] = useState<[number, number][] | null>(null);
@@ -94,7 +95,20 @@ export default function App() {
   navigatingRef.current = navigating;
   const routeReqId = useRef(0);
   const offRouteCount = useRef(0);
+  const lastArclength = useRef(-Infinity);
+  const lastStepIndex = useRef(-1);
   const wasGpsOk = useRef(false);
+
+  // Escape: close the drawer first, then clear a results list
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (sidebarOpen) setSidebarOpen(false);
+      else if (results.length > 0) setResults([]);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [sidebarOpen, results.length]);
 
   // ── online / offline ───────────────────────────────────────────────────────
   useEffect(() => {
@@ -186,17 +200,23 @@ export default function App() {
     [pushBanner],
   );
 
-  // (re)calculate when destination or mode changes
+  // (re)calculate only when the *place* or the mode changes. The destination
+  // object itself is replaced when a dropped pin gets its street name back —
+  // that must not trigger a second routing request.
+  const destKey = destination ? `${destination.lat},${destination.lon}` : '';
   useEffect(() => {
-    if (destination) void fetchRoute(destination, mode);
-  }, [destination, mode, fetchRoute]);
+    const d = destRef.current;
+    if (d) void fetchRoute(d, mode);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [destKey, mode, fetchRoute]);
 
   // when GPS first locks: fly to the user, and redo the route from the real position
   useEffect(() => {
     if (geo.status === 'ok' && !wasGpsOk.current) {
       if (posRef.current) {
         const { longitude, latitude } = posRef.current.coords;
-        if (!navigatingRef.current) mapApi.current?.centerOn([longitude, latitude], 15.5);
+        // only jump to the user when there is nothing else on screen to look at
+        if (!navigatingRef.current && !destRef.current) mapApi.current?.centerOn([longitude, latitude], 15.5);
       }
       if (destRef.current && !navigatingRef.current) void fetchRoute(destRef.current, modeRef.current);
     }
@@ -213,8 +233,8 @@ export default function App() {
       const r = await searchPlaces(q);
       setResults(r);
       setSearchStatus('idle');
+      setEmptySearch(r.length === 0 ? q : '');
       if (r.length > 0) setSnap('full');
-      else pushBanner('info', 'Nothing found. Try a street, a shop or a town.');
     } catch {
       setResults([]);
       setSearchStatus('error');
@@ -230,18 +250,41 @@ export default function App() {
   const pickPlace = useCallback((p: Place) => {
     setDestination(p);
     setResults([]);
+    setEmptySearch('');
     setQuery('');
     setSnap('peek');
+    if (!navigatingRef.current && Number.isFinite(p.lon) && Number.isFinite(p.lat)) {
+      mapApi.current?.centerOn([p.lon, p.lat], CONFIG.map.pickZoom);
+    }
   }, []);
 
   // ── map tap → drop pin ─────────────────────────────────────────────────────
+  const tapReqId = useRef(0);
   const onMapTap = useCallback(
-    async (ll: [number, number]) => {
-      setSnap('peek');
-      const name = await reverseGeocode(ll[1], ll[0]);
-      pickPlace({ id: `pin:${ll[1].toFixed(6)},${ll[0].toFixed(6)}`, name, lat: ll[1], lon: ll[0], kind: 'pin' });
+    (ll: [number, number]) => {
+      // tapping the map mid-drive would silently change the destination and
+      // cancel navigation — that has to be an explicit action instead
+      if (navigatingRef.current) {
+        pushBanner('info', 'You are navigating. Stop first to pick a new destination.');
+        return;
+      }
+      if (!Number.isFinite(ll[0]) || !Number.isFinite(ll[1])) return;
+      const id = `pin:${ll[1].toFixed(6)},${ll[0].toFixed(6)}`;
+      const fallback = `${formatCoord(ll[1], ll[0])}`;
+      // pin lands immediately with the coordinates; the street name is a
+      // nicety that arrives (or doesn't) afterwards. Never a dead tap.
+      pickPlace({ id, name: fallback, lat: ll[1], lon: ll[0], kind: 'pin' });
+      const reqId = ++tapReqId.current;
+      void reverseGeocode(ll[1], ll[0])
+        .then((name) => {
+          if (reqId !== tapReqId.current || !name) return;
+          setDestination((d) => (d && d.id === id ? { ...d, name } : d));
+        })
+        .catch(() => {
+          /* keep the coordinate name — the route still works */
+        });
     },
-    [pickPlace],
+    [pickPlace, pushBanner],
   );
 
   // ── navigation ─────────────────────────────────────────────────────────────
@@ -249,6 +292,8 @@ export default function App() {
   const startNav = useCallback(() => {
     setNavigating(true);
     setFollow(true);
+    lastArclength.current = -Infinity;
+    lastStepIndex.current = -1;
     setSnap('hidden'); // navigation mode: map gets the whole screen
     lastSpokenStep.current = -1; // speak the first maneuver again on (re)start
     offRouteCount.current = 0;
@@ -309,10 +354,9 @@ export default function App() {
     const p: [number, number] = [geo.pos.coords.longitude, geo.pos.coords.latitude];
     const near = nearestOnPolyline(route.coords, p);
 
-    // snap the dot onto the route when we're close to it (smoother tracking);
-    // tighter while navigating for max precision
-    const snapM = navigating ? 25 : 40;
-    if (near.distM < snapM) {
+    // snap the dot onto the route when we're close to it — 25 m keeps the
+    // arrow on the road instead of drifting between fixes
+    if (near.distM < CONFIG.map.snapToRouteM) {
       setDisplayPos({ ...geo.pos, coords: { ...geo.pos.coords, longitude: near.point[0], latitude: near.point[1] } });
     } else {
       setDisplayPos(null);
@@ -334,16 +378,22 @@ export default function App() {
       prevFix.current = { ll: p, t: now };
     }
 
-    setRemainingCoords([near.point, ...route.coords.slice(near.segmentIndex + 1)]);
-
     // progress through the steps — pure, unit-tested math (lib/navmath)
     const prog = computeNavProgress(route, near.arclengthM);
-    setNav({
-      stepIndex: prog.stepIndex,
-      distToNextM: prog.distToNextM,
-      remainingM: prog.remainingM,
-      remainingS: prog.remainingS,
-    });
+    // push a new polyline / card only when something visible moved: re-uploading
+    // the route geometry on every 1 Hz fix is wasted work while driving
+    const advanced = Math.abs(near.arclengthM - lastArclength.current) >= 5;
+    if (advanced || prog.stepIndex !== lastStepIndex.current) {
+      lastArclength.current = near.arclengthM;
+      lastStepIndex.current = prog.stepIndex;
+      setRemainingCoords([near.point, ...route.coords.slice(near.segmentIndex + 1)]);
+      setNav({
+        stepIndex: prog.stepIndex,
+        distToNextM: prog.distToNextM,
+        remainingM: prog.remainingM,
+        remainingS: prog.remainingS,
+      });
+    }
 
     if (near.distM > CONFIG.reroute.thresholdM) {
       offRouteCount.current += 1;
@@ -365,7 +415,8 @@ export default function App() {
   const recenter = useCallback(() => {
     const pos = posRef.current;
     if (pos) {
-      mapApi.current?.centerOn([pos.coords.longitude, pos.coords.latitude], CONFIG.map.navigationZoom);
+      // keep the zoom the user chose while browsing; only zoom in for driving
+      mapApi.current?.centerOn([pos.coords.longitude, pos.coords.latitude], navigatingRef.current ? CONFIG.map.navigationZoom : undefined);
       setFollow(true);
     } else {
       // no fix yet: nothing to center on — arm follow mode so the map snaps to
@@ -465,13 +516,34 @@ export default function App() {
     <>
       {searchStatus === 'loading' && <div className="body-note dim">Searching…</div>}
       {searchStatus === 'error' && <div className="body-note err">Search isn't answering. Check your connection.</div>}
+      {searchStatus === 'idle' && results.length === 0 && emptySearch && (
+        <div className="body-note dim">
+          Nothing matched “{emptySearch}”. Try a street, a shop or a town.
+        </div>
+      )}
+      {results.length > 0 && (
+        <div className="body-head">
+          <span className="body-label">Results · {results.length}</span>
+          <button
+            className="icon-btn"
+            onClick={() => { setResults([]); setEmptySearch(''); }}
+            aria-label="Clear results"
+            title="Clear results"
+          >
+            ×
+          </button>
+        </div>
+      )}
       {results.length > 0 && (
         <ul className="results">
           {results.map((r) => (
             <li key={r.id}>
               <button onClick={() => pickPlace(r)}>
                 <span className="r-name">{r.name}</span>
-                <span className="r-kind mono">{r.kind ?? 'place'}</span>
+                <span className="r-kind mono">
+                  {geo.pos ? `${formatDistance(haversineM([geo.pos.coords.longitude, geo.pos.coords.latitude], [r.lon, r.lat]))} · ` : ''}
+                  {r.kind ?? 'place'}
+                </span>
               </button>
             </li>
           ))}
@@ -599,7 +671,7 @@ export default function App() {
           onRecenter={recenter}
         />
 
-        {snap === 'hidden' && (
+        {snap === 'hidden' && !navigating && (
           <button className="fab" onClick={() => setSnap('peek')}>
             Search
           </button>

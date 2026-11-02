@@ -3,6 +3,7 @@ import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import type { Feature, LineString } from 'geojson';
 import { CONFIG, previewProxied, svcUrl, rewriteStyleUrls, styleUrlFor, type MapStyle } from '../config';
+import { buildBaseStyle } from '../lib/mapStyle';
 import type { Place, RouteResult } from '../types';
 import type { Theme } from '../hooks/useTheme';
 import { bearingDeg, circlePolygon, haversineM } from '../lib/geo';
@@ -90,12 +91,43 @@ export function MapView(props: MapViewProps) {
 const styleFor = (theme: Theme, mapStyle: MapStyle = 'auto') => styleUrlFor(theme, mapStyle);
 
 /**
- * Resolve the style for a theme. Production: pass the URL through (cached by
- * the service worker). Arena preview (*.e2b.app): fetch the style JSON through
- * the same-origin proxy and rewrite every absolute URL inside it (sources,
- * sprite, glyphs) to the proxy too, so nothing cross-origin is requested.
+ * Resolve the map style for a theme.
+ *
+ * Our own basemap (lib/mapStyle) is used for 'auto' / 'dark' / 'light': it is a
+ * plain object, so there is no style request at all and the first tiles can
+ * start loading immediately. 'liberty' / 'bright' stay available as classic
+ * OpenFreeMap styles (fetched once, then cached by the service worker).
+ *
+ * In the Arena preview (*.e2b.app) every absolute URL inside a style is
+ * rewritten to the same-origin proxy, so nothing cross-origin is requested.
  */
 async function resolveStyle(theme: Theme, mapStyle: MapStyle = 'auto'): Promise<string | maplibregl.StyleSpecification> {
+  if (mapStyle !== 'liberty' && mapStyle !== 'bright') {
+    const base = mapStyle === 'dark' ? 'dark' : mapStyle === 'light' ? 'light' : theme;
+    const style = buildBaseStyle(base);
+    if (!previewProxied()) return style;
+    // preview: route every URL through /proxy — including the TileJSON's own
+    // absolute tile URLs, which would otherwise skip the proxy and be blocked
+    const proxied = rewriteStyleUrls(style);
+    const src = proxied.sources.openmaptiles as { url?: string; tiles?: string[]; minzoom?: number; maxzoom?: number };
+    if (src?.url) {
+      try {
+        const res = await fetch(src.url, { headers: { Accept: 'application/json' } });
+        if (res.ok) {
+          const tj = (await res.json()) as { tiles?: string[]; minzoom?: number; maxzoom?: number; attribution?: string };
+          if (Array.isArray(tj.tiles) && tj.tiles.length) {
+            src.tiles = tj.tiles.map((u) => svcUrl(u));
+            if (Number.isFinite(tj.minzoom)) src.minzoom = tj.minzoom;
+            if (Number.isFinite(tj.maxzoom)) src.maxzoom = tj.maxzoom;
+            delete src.url;
+          }
+        }
+      } catch {
+        /* keep url — MapLibre will still try the proxied TileJSON */
+      }
+    }
+    return proxied;
+  }
   const url = styleFor(theme, mapStyle);
   if (!previewProxied()) return url;
   const res = await fetch(svcUrl(url), { headers: { Accept: 'application/json' } });
@@ -144,16 +176,30 @@ function GlMapView(props: MapViewProps) {
     if (!map.getSource('route-full')) {
       map.addSource('route-full', { type: 'geojson', data: emptyLine });
       map.addSource('route-rest', { type: 'geojson', data: emptyLine });
+      // route lines belong *under* the street labels, like any decent map
+      const firstSymbol = (map.getStyle().layers ?? []).find((l) => l.type === 'symbol')?.id;
+      const before = firstSymbol;
+      const casing = getCssVar('--route-casing') || '#000';
+      map.addLayer({
+        id: 'route-full-casing', type: 'line', source: 'route-full',
+        layout: { 'line-join': 'round', 'line-cap': 'round' },
+        paint: { 'line-color': casing, 'line-width': 10, 'line-opacity': 0.55 },
+      }, before);
       map.addLayer({
         id: 'route-full-line', type: 'line', source: 'route-full',
         layout: { 'line-join': 'round', 'line-cap': 'round' },
         paint: { 'line-color': navigating ? routeColor : accent, 'line-width': 6, 'line-opacity': navigating ? 0.45 : 1 },
-      });
+      }, before);
+      map.addLayer({
+        id: 'route-rest-casing', type: 'line', source: 'route-rest',
+        layout: { 'line-join': 'round', 'line-cap': 'round' },
+        paint: { 'line-color': casing, 'line-width': 10, 'line-opacity': 0.55 },
+      }, before);
       map.addLayer({
         id: 'route-rest-line', type: 'line', source: 'route-rest',
         layout: { 'line-join': 'round', 'line-cap': 'round' },
         paint: { 'line-color': accent, 'line-width': 6 },
-      });
+      }, before);
     }
     const full = route?.coords?.length ? lineFeature(route.coords) : emptyLine;
     const rest = navigating && remaining?.length ? lineFeature(remaining) : emptyLine;

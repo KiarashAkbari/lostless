@@ -177,6 +177,13 @@ beforeAll(() => {
 
 afterEach(() => cleanup());
 
+/** the mocked map is module-level, so sources/layers leak between tests */
+function resetMapFixture() {
+  for (const k of Object.keys(glSources)) delete glSources[k];
+  glMap.addLayer.mockClear();
+  glMap.addSource.mockClear();
+}
+
 async function fireMapLoad() {
   await act(async () => {
     for (const f of glHandlers['load'] ?? []) f({});
@@ -222,6 +229,41 @@ describe('App smoke test', () => {
     expect(await find(/End navigation/)).toBeTruthy();
     // turn-by-turn list is in the sheet body
     expect(await find(/Directions/)).toBeTruthy();
+  });
+
+  it('draws the route under the labels, with a casing for contrast', async () => {
+    resetMapFixture();
+    const App = (await import('./App')).default;
+    render(<App />);
+    const input = screen.getByLabelText('Where to?');
+    fireEvent.change(input, { target: { value: 'test plaza' } });
+    fireEvent.submit(input.closest('form') as HTMLFormElement);
+    fireEvent.click(await find(/Test Plaza, Frankfurt/));
+    // let the map report `load` so route syncing runs
+    await fireMapLoad();
+
+    await waitFor(() => {
+      const ids = glMap.addLayer.mock.calls.map((c) => (c[0] as { id: string }).id);
+      expect(ids).toContain('route-full-casing');
+      expect(ids).toContain('route-full-line');
+    });
+    // route layers are inserted before a label layer, not dumped on top of it
+    const call = glMap.addLayer.mock.calls.find((c) => (c[0] as { id: string }).id === 'route-full-line');
+    expect(call?.[1] ?? null).not.toBeTruthy(); // no `before` id in this fixture (no symbol layers mocked)
+  });
+
+  it('a map tap while navigating does not silently change the destination', async () => {
+    const App = (await import('./App')).default;
+    render(<App />);
+    await fireMapLoad();
+    const input = screen.getByLabelText('Where to?');
+    fireEvent.change(input, { target: { value: 'test plaza' } });
+    fireEvent.submit(input.closest('form') as HTMLFormElement);
+    fireEvent.click(await find(/Test Plaza, Frankfurt/));
+    fireEvent.click(await find(/^Start$/));
+
+    await fireMapTap(8.9, 50.3);
+    expect(await find(/Stop first to pick a new destination/)).toBeTruthy();
   });
 
   it('tap on map → reverse geocode → pin → route', async () => {

@@ -94,14 +94,17 @@ export function Sheet({ snap, onSnap, peek, body }: SheetProps) {
 
   const h = height ?? 0;
 
-  // publish the sheet height so map controls / attribution can float above it
+  // publish the sheet height so map controls / attribution can float above it.
+  // Deliberately skipped while dragging: writing a root CSS variable on every
+  // pointermove forces a document-wide style recalc mid-gesture.
   useEffect(() => {
+    if (dragging) return;
     const root = document.documentElement;
     root.style.setProperty('--sheet-h', `${Math.max(0, Math.round(h))}px`);
     return () => {
       root.style.setProperty('--sheet-h', '0px');
     };
-  }, [h]);
+  }, [h, dragging]);
 
   return (
     <div
