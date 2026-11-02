@@ -16,7 +16,12 @@
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
+import pkg from '../package.json';
+
 export type TravelMode = 'car' | 'walk' | 'bike';
+
+/** app version — single source is package.json (no duplicated literals) */
+export const APP_VERSION: string = pkg.version;
 
 /** map style choices (all free OpenFreeMap styles, no key) */
 export type MapStyle = 'auto' | 'dark' | 'light' | 'liberty' | 'bright';

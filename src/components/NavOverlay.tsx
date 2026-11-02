@@ -22,16 +22,19 @@ const MODE_LABEL: Record<TravelMode, string> = { car: 'DRIVE', walk: 'WALK', bik
  * route progress bar, and an ETA / speed strip with a STOP button.
  */
 export function NavOverlay({ step, distToNextM, remainingM, remainingS, speedKmh, progress, mode, onStop }: NavOverlayProps) {
-  if (!step) return null;
+  // a route with zero steps still needs the overlay (STOP button, ETA) — show a fallback card
+  const glyph = step ? maneuverGlyph(step) : '◦';
+  const label = step ? maneuverLabel(step).toUpperCase() : 'NAVIGATING';
+  const street = step ? step.street || step.instruction : '';
   return (
     <div className="nav-overlay">
       <div className="nav-main">
-        <span className="nav-glyph" aria-hidden>{maneuverGlyph(step)}</span>
+        <span className="nav-glyph" aria-hidden>{glyph}</span>
         <div className="nav-text">
           <div className="nav-in">
-            <span className="mono nav-dist">{formatDistance(distToNextM)}</span> {maneuverLabel(step).toUpperCase()}
+            <span className="mono nav-dist">{formatDistance(distToNextM)}</span> {label}
           </div>
-          <div className="nav-street mono">{step.street || step.instruction}</div>
+          <div className="nav-street mono">{street}</div>
         </div>
         <span className="chip mono nav-mode">{MODE_LABEL[mode]}</span>
       </div>

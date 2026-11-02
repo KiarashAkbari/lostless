@@ -8,7 +8,19 @@ function read(): Place[] {
     const raw = localStorage.getItem(CONFIG.storageKeys.favorites);
     if (!raw) return [];
     const parsed = JSON.parse(raw) as Place[];
-    return Array.isArray(parsed) ? parsed.filter((p) => typeof p?.lat === 'number' && typeof p?.lon === 'number') : [];
+    // validate hard: a favorite with NaN coords or no id would break the map /
+    // the dedup logic, so anything malformed is dropped
+    return Array.isArray(parsed)
+      ? parsed.filter(
+          (p) =>
+            p &&
+            typeof p.id === 'string' &&
+            p.id.length > 0 &&
+            typeof p.name === 'string' &&
+            Number.isFinite(p.lat) &&
+            Number.isFinite(p.lon),
+        )
+      : [];
   } catch {
     return [];
   }

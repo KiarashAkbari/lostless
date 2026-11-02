@@ -17,7 +17,8 @@ export function RasterMapView(props: MapViewProps) {
   const destRef = useRef<L.Marker | null>(null);
   const routeRef = useRef<L.Polyline | null>(null);
   const restRef = useRef<L.Polyline | null>(null);
-  const fittedRef = useRef(false);
+  /** the route object we last fitted the view to — refit when a NEW route arrives */
+  const fittedRouteRef = useRef<unknown>(null);
 
   const dataRef = useRef(props);
   dataRef.current = props;
@@ -115,7 +116,7 @@ export function RasterMapView(props: MapViewProps) {
     } else if (destRef.current) {
       destRef.current.remove();
       destRef.current = null;
-      fittedRef.current = false;
+      fittedRouteRef.current = null;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.destination]);
@@ -138,8 +139,9 @@ export function RasterMapView(props: MapViewProps) {
       routeRef.current = L.polyline(pts, {
         color: '#c8ff2e', weight: 6, opacity: navigating ? 0.4 : 1, lineJoin: 'round',
       }).addTo(map);
-      if (!navigating && !fittedRef.current) {
-        fittedRef.current = true;
+      // fit the view to each NEW route (second destination, reroute, mode switch)
+      if (!navigating && fittedRouteRef.current !== route) {
+        fittedRouteRef.current = route;
         map.fitBounds(routeRef.current.getBounds(), { padding: [40, 40] });
       }
       if (navigating && remainingCoords?.length) {
@@ -148,7 +150,7 @@ export function RasterMapView(props: MapViewProps) {
         }).addTo(map);
       }
     } else {
-      fittedRef.current = false;
+      fittedRouteRef.current = null;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.route, props.remainingCoords, props.navigating]);
@@ -159,9 +161,10 @@ export function RasterMapView(props: MapViewProps) {
     const p = props.displayPos ?? props.pos;
     if (!map || !props.navigating || !props.follow || !p) return;
     const { latitude, longitude } = p.coords;
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return; // Leaflet throws on NaN
     map.setView([latitude, longitude], Math.max(map.getZoom(), CONFIG.map.navigationZoom), { animate: !reduced() });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.pos, props.navigating, props.follow]);
+  }, [props.pos, props.displayPos, props.navigating, props.follow]);
 
   return (
     <div

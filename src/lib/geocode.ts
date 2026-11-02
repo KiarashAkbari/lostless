@@ -1,5 +1,7 @@
 import { CONFIG, svcUrl } from '../config';
 import type { Place } from '../types';
+import { createThrottler } from './throttle';
+import { finite } from './geo';
 
 /**
  * Nominatim (OpenStreetMap search). Usage policy: max 1 request/second and an
@@ -7,23 +9,23 @@ import type { Place } from '../types';
  * hard-throttle to 1 req/s here. Searches fire on Enter only, never per keystroke.
  */
 
-let lastRequestAt = 0;
+// Nominatim usage policy: max 1 req/s — shared throttler, lazy interval
+const throttle = createThrottler(() => CONFIG.nominatim.minIntervalMs);
 
 async function throttledFetch(url: string): Promise<Response> {
-  const wait = Math.max(0, CONFIG.nominatim.minIntervalMs - (Date.now() - lastRequestAt));
-  if (wait > 0) await new Promise((r) => setTimeout(r, wait));
-  lastRequestAt = Date.now();
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), CONFIG.nominatim.timeoutMs);
-  try {
-    return await fetch(url, {
-      signal: ctrl.signal,
-      headers: { Accept: 'application/json' },
-      credentials: 'omit',
-    });
-  } finally {
-    clearTimeout(timer);
-  }
+  return throttle(async () => {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), CONFIG.nominatim.timeoutMs);
+    try {
+      return await fetch(url, {
+        signal: ctrl.signal,
+        headers: { Accept: 'application/json' },
+        credentials: 'omit',
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+  });
 }
 
 export async function searchPlaces(query: string): Promise<Place[]> {
@@ -57,10 +59,14 @@ export async function searchPlaces(query: string): Promise<Place[]> {
 
 /** human-readable name for a tapped map point; falls back to raw coordinates */
 export async function reverseGeocode(lat: number, lon: number): Promise<string> {
+  // never put NaN into the URL — fall back to (sanitized) coordinates
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+    return `${finite(lat, 0).toFixed(5)}, ${finite(lon, 0).toFixed(5)}`;
+  }
   try {
     const url =
       `${svcUrl(CONFIG.nominatim.baseUrl)}/reverse?format=jsonv2` +
-      `&lat=${lat}&lon=${lon}&zoom=17`;
+      `&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}&zoom=17`;
     const res = await throttledFetch(url);
     if (!res.ok) throw new Error(`reverse failed (HTTP ${res.status})`);
     const d = (await res.json()) as { display_name?: string };

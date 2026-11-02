@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { CONFIG, type MapStyle } from '../config';
+import { APP_VERSION, type MapStyle } from '../config';
 import type { Place, Settings } from '../types';
 import type { Theme } from '../hooks/useTheme';
 import { speechSupported } from '../lib/voice';
@@ -134,7 +134,7 @@ export function Sidebar(props: SidebarProps) {
             <p className="sb-text mono dim">
               NAV UI INSPIRED BY NESHAN / BALAD: BIG NEXT-TURN CARD, ETA, SPEED, VOICE.
             </p>
-            <p className="sb-text mono dim">VERSION {CONFIG.ui ? '1.0' : '1.0'} · PWA · WORKS OFFLINE FOR CACHED TILES</p>
+            <p className="sb-text mono dim">VERSION {APP_VERSION} · PWA · WORKS OFFLINE FOR CACHED TILES</p>
           </div>
         )}
       </aside>

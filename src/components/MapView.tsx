@@ -430,7 +430,8 @@ function GlMapView(props: MapViewProps) {
       if (moved < 4) return;
     }
     lastFollowRef.current = [longitude, latitude];
-    const bearing = heading !== null && !Number.isNaN(heading) ? heading : map.getBearing();
+    // heading can be null or NaN/Infinity on some WebViews — only trust finite values
+    const bearing = heading !== null && Number.isFinite(heading) ? heading : map.getBearing();
     const target = { center: [longitude, latitude] as [number, number], zoom: Math.max(map.getZoom(), CONFIG.map.navigationZoom), bearing };
     if (instantRef.current) {
       map.jumpTo(target);

@@ -1,8 +1,9 @@
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import { CONFIG, type TravelMode } from './config';
-import type { Banner, Place, RouteResult, Settings, SheetSnap } from './types';
+import type { Place, RouteResult, Settings, SheetSnap } from './types';
 import { useGeolocation } from './hooks/useGeolocation';
 import { useTheme } from './hooks/useTheme';
+import { useBanners } from './hooks/useBanners';
 import { Sheet } from './components/Sheet';
 import { TopBar } from './components/TopBar';
 import { SearchBox } from './components/SearchBox';
@@ -16,6 +17,7 @@ import type { MapApi, MapRenderer, MapStatus } from './components/MapView';
 import { searchPlaces, reverseGeocode } from './lib/geocode';
 import { getRoute } from './lib/routing';
 import { nearestOnPolyline, formatCoord, formatDistance, haversineM } from './lib/geo';
+import { computeNavProgress } from './lib/navmath';
 import { maneuverLabel } from './lib/maneuvers';
 import { getFavorites, isFavorite, addFavorite, removeFavorite, getSettings, setSettings as persistSettings } from './lib/storage';
 import { acquireWakeLock, releaseWakeLock, reacquireOnVisible, wakeLockSupported } from './lib/wakelock';
@@ -35,11 +37,10 @@ interface NavState {
   remainingS: number;
 }
 
-let bannerSeq = 0;
-
 export default function App() {
   const { theme, toggle: toggleTheme } = useTheme();
   const geo = useGeolocation();
+  const { banners, pushBanner, dismissBanner, clearTags } = useBanners();
 
   const [destination, setDestination] = useState<Place | null>(null);
   const [mode, setMode] = useState<TravelMode>('car');
@@ -52,7 +53,6 @@ export default function App() {
   const [results, setResults] = useState<Place[]>([]);
   const [searchStatus, setSearchStatus] = useState<SearchStatus>('idle');
   const [favorites, setFavorites] = useState<Place[]>(() => getFavorites());
-  const [banners, setBanners] = useState<Banner[]>([]);
   const [nav, setNav] = useState<NavState | null>(null);
   const [remainingCoords, setRemainingCoords] = useState<[number, number][] | null>(null);
   const [online, setOnline] = useState<boolean>(navigator.onLine);
@@ -96,21 +96,6 @@ export default function App() {
   const offRouteCount = useRef(0);
   const wasGpsOk = useRef(false);
 
-  // ── banners ────────────────────────────────────────────────────────────────
-  const dismissBanner = useCallback((id: number) => {
-    setBanners((b) => b.filter((x) => x.id !== id));
-  }, []);
-
-  const pushBanner = useCallback(
-    (kind: Banner['kind'], msg: string, opts?: { tag?: string; sticky?: boolean; action?: Banner['action']; action2?: Banner['action2'] }) => {
-      const id = ++bannerSeq;
-      if (opts?.tag) setBanners((b) => [...b.filter((x) => x.tag !== opts.tag), { id, kind, msg, tag: opts.tag, action: opts?.action, action2: opts?.action2 }]);
-      else setBanners((b) => [...b, { id, kind, msg, action: opts?.action, action2: opts?.action2 }]);
-      if (!opts?.sticky) setTimeout(() => dismissBanner(id), 6500);
-    },
-    [dismissBanner],
-  );
-
   // ── online / offline ───────────────────────────────────────────────────────
   useEffect(() => {
     const on = () => setOnline(true);
@@ -125,11 +110,11 @@ export default function App() {
 
   useEffect(() => {
     if (online) {
-      setBanners((b) => b.filter((x) => x.tag !== 'net'));
+      clearTags('net');
     } else {
       pushBanner('error', 'YOU ARE OFFLINE — CACHED TILES ONLY, ROUTING/SEARCH UNAVAILABLE', { tag: 'net', sticky: true });
     }
-  }, [online, pushBanner]);
+  }, [online, pushBanner, clearTags]);
 
   // ── GPS status banners ─────────────────────────────────────────────────────
   useEffect(() => {
@@ -154,9 +139,9 @@ export default function App() {
       }, 10000);
       return () => clearTimeout(t);
     } else {
-      setBanners((b) => b.filter((x) => x.tag !== 'gps' && x.tag !== 'gps-slow'));
+      clearTags('gps', 'gps-slow');
     }
-  }, [geo.status, geo.retry, pushBanner]);
+  }, [geo.status, geo.retry, pushBanner, clearTags]);
 
   // ── routing ────────────────────────────────────────────────────────────────
   const fetchRoute = useCallback(
@@ -182,7 +167,16 @@ export default function App() {
           navigator.onLine
             ? 'ROUTING SERVER UNREACHABLE OR NO ROUTE — RETRY, OR SWITCH SERVER IN src/config.ts'
             : 'OFFLINE — CANNOT CALCULATE ROUTE',
-          { tag: 'route' },
+          {
+            tag: 'route',
+            sticky: true, // stays until fixed — it carries a RETRY action
+            action: {
+              label: 'RETRY',
+              onClick: () => {
+                if (destRef.current) void fetchRoute(destRef.current, modeRef.current);
+              },
+            },
+          },
         );
         void err;
       }
@@ -208,6 +202,7 @@ export default function App() {
   }, [geo.status, fetchRoute]);
 
   // ── search ─────────────────────────────────────────────────────────────────
+  const onSearchRef = useRef<() => void>(() => {});
   const onSearch = useCallback(async () => {
     const q = query.trim();
     if (!q || searchStatus === 'loading') return;
@@ -221,9 +216,14 @@ export default function App() {
     } catch {
       setResults([]);
       setSearchStatus('error');
-      pushBanner('error', 'SEARCH FAILED — NOMINATIM UNREACHABLE (OR OFFLINE)', { tag: 'search' });
+      pushBanner('error', 'SEARCH FAILED — NOMINATIM UNREACHABLE (OR OFFLINE)', {
+        tag: 'search',
+        sticky: true,
+        action: { label: 'RETRY', onClick: () => void onSearchRef.current() },
+      });
     }
   }, [query, searchStatus, pushBanner]);
+  onSearchRef.current = onSearch;
 
   const pickPlace = useCallback((p: Place) => {
     setDestination(p);
@@ -243,10 +243,13 @@ export default function App() {
   );
 
   // ── navigation ─────────────────────────────────────────────────────────────
+  const lastSpokenStep = useRef(-1);
   const startNav = useCallback(() => {
     setNavigating(true);
     setFollow(true);
     setSnap('hidden'); // navigation mode: map gets the whole screen
+    lastSpokenStep.current = -1; // speak the first maneuver again on (re)start
+    offRouteCount.current = 0;
     if (settings.voice) speak('Navigation started');
   }, [settings.voice]);
 
@@ -260,7 +263,6 @@ export default function App() {
   }, []);
 
   // voice guidance: speak the next maneuver whenever the step changes
-  const lastSpokenStep = useRef(-1);
   useEffect(() => {
     if (!navigating || !nav || !route || !settings.voice) return;
     if (nav.stepIndex === lastSpokenStep.current) return;
@@ -329,20 +331,13 @@ export default function App() {
 
     setRemainingCoords([near.point, ...route.coords.slice(near.segmentIndex + 1)]);
 
-    let acc = 0;
-    let idx = 0;
-    for (let i = 0; i < route.steps.length; i++) {
-      acc += route.steps[i].distanceM;
-      idx = i;
-      if (acc >= near.arclengthM) break;
-    }
-    const stepEnd = route.steps.slice(0, idx + 1).reduce((s, x) => s + (x.distanceM || 0), 0);
-    const remainingM = Math.max(0, route.distanceM - near.arclengthM);
+    // progress through the steps — pure, unit-tested math (lib/navmath)
+    const prog = computeNavProgress(route, near.arclengthM);
     setNav({
-      stepIndex: idx,
-      distToNextM: Math.max(0, stepEnd - near.arclengthM),
-      remainingM,
-      remainingS: route.distanceM > 0 ? route.durationS * (remainingM / route.distanceM) : 0,
+      stepIndex: prog.stepIndex,
+      distToNextM: prog.distToNextM,
+      remainingM: prog.remainingM,
+      remainingS: prog.remainingS,
     });
 
     if (near.distM > CONFIG.reroute.thresholdM) {
@@ -368,8 +363,10 @@ export default function App() {
       mapApi.current?.centerOn([pos.coords.longitude, pos.coords.latitude], CONFIG.map.navigationZoom);
       setFollow(true);
     } else {
-      setFollow((f) => !f);
-      pushBanner('info', 'NO GPS FIX YET — CENTERED ON MAP VIEW', { tag: 'recenter' });
+      // no fix yet: nothing to center on — arm follow mode so the map snaps to
+      // the user as soon as the first fix arrives
+      setFollow(true);
+      pushBanner('info', 'NO GPS FIX YET — FOLLOW ARMED, MAP CENTERS WHEN GPS LOCKS', { tag: 'recenter' });
     }
   }, [pushBanner]);
 
@@ -419,10 +416,10 @@ export default function App() {
           },
         });
       } else {
-        setBanners((b) => b.filter((x) => x.tag !== 'map'));
+        clearTags('map');
       }
     },
-    [pushBanner, forceRaster, settings, updateSettings],
+    [pushBanner, clearTags, forceRaster, settings, updateSettings],
   );
 
   // ── render ─────────────────────────────────────────────────────────────────
@@ -565,7 +562,7 @@ export default function App() {
 
         <div className="banners">
           {banners.map((b) => (
-            <div key={b.id} className={`banner mono ${b.kind}`}>
+            <div key={b.id} className={`banner mono ${b.kind}`} role={b.kind === 'error' ? 'alert' : 'status'}>
               <span className="b-msg">{b.msg}</span>
               {b.action && (
                 <button className="mini-btn mono" onClick={b.action.onClick}>
