@@ -157,6 +157,11 @@ export function previewProxied(hostname: string = typeof window !== 'undefined' 
 /** Map a production service URL to the URL actually used at runtime. */
 export function svcUrl(url: string, hostname?: string): string {
   if (!previewProxied(hostname)) return url;
+  return proxyUrl(url);
+}
+
+/** force the same-origin proxy path for a known host, ignoring the hostname */
+export function proxyUrl(url: string): string {
   for (const [host, proxyPath] of HOST_TO_PROXY) {
     if (url.startsWith(host)) return proxyPath + url.slice(host.length);
   }

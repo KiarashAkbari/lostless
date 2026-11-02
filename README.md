@@ -182,11 +182,19 @@ plain CSS (no framework). One typeface, Barlow (two latin subsets, ~44 kB), with
 system mono reserved for numerals and coordinates. Interface is frosted glass on matte
 black; panels float over a full-bleed map. No backend, no database, no keys.
 
+Tiles are fetched **directly from the tile host** first — the browser is what
+downloads them, so the CDN is the fastest route. A same-origin `/proxy/*` fallback
+exists for sandboxed previews where third-party hosts are sealed off; the app probes
+both at startup (`src/lib/tilebase.ts`) and uses whichever answers, then tells you
+plainly if neither does.
+
 The basemap is **hand-written** (`src/lib/mapStyle.ts`) rather than a downloaded style:
-about 35 layers instead of 110, no sprite sheet, roads drawn as a colour-coded ladder
-(warm motorways, white primaries, soft local streets with casings), buildings and points
-of interest only at street zoom, and two low-saturation palettes (`paper` for light,
-`slate` for dark). The style object is validated against the official MapLibre spec in
+about 35 layers instead of 110, no sprite sheet, and roads drawn as a colour-coded
+ladder — amber motorways, soft-yellow primaries, white local streets, each with its own
+casing, tunnels dashed, footpaths dotted. Two palettes: **paper** (warm cream land,
+green parks, blue-grey water, atlas-style typography) and **night** (near-black ground
+with the road network lifted out of it). Buildings appear at z15, points of interest as
+coloured dots from z16, so a city view stays legible and cheap. The style object is validated against the official MapLibre spec in
 the test suite, so an invalid expression fails CI instead of blanking a layer.
 
 ## Project layout

@@ -161,6 +161,10 @@ beforeAll(() => {
     'fetch',
     vi.fn(async (input: unknown) => {
       const url = String(input);
+      // the basemap probes the vector TileJSON before it builds a style
+      if (url.includes('/planet')) {
+        return ok({ tiles: ['https://tiles.openfreemap.org/planet/{z}/{x}/{y}.pbf'], minzoom: 0, maxzoom: 14 });
+      }
       if (url.includes('nominatim.openstreetmap.org/search')) {
         return ok([{ place_id: 42, display_name: 'Test Plaza, Frankfurt am Main, Germany', lat: '50.1136', lon: '8.6753', type: 'amenity' }]);
       }
@@ -229,6 +233,35 @@ describe('App smoke test', () => {
     expect(await find(/End navigation/)).toBeTruthy();
     // turn-by-turn list is in the sheet body
     expect(await find(/Directions/)).toBeTruthy();
+  });
+
+  it('keeps every control OUT of the map layer (nothing can hide under the canvas)', async () => {
+    const App = (await import('./App')).default;
+    const { container } = render(<App />);
+    const mapLayer = container.querySelector('.map-layer');
+    expect(mapLayer).toBeTruthy();
+    // the map is alone in its layer
+    expect(mapLayer!.querySelector('[data-testid="map"]')).toBeTruthy();
+    // and the chrome is not
+    for (const sel of ['.topbar', '.sheet', '.map-buttons', '.banners']) {
+      const el = container.querySelector(sel);
+      expect(el, sel).toBeTruthy();
+      expect(mapLayer!.contains(el), `${sel} must not live inside the map layer`).toBe(false);
+    }
+    const input = screen.getByLabelText('Where to?');
+    expect(mapLayer!.contains(input)).toBe(false);
+  });
+
+  it('a failed map load does not permanently save lite mode', async () => {
+    const App = (await import('./App')).default;
+    render(<App />);
+    await fireMapLoad();
+    await act(async () => {
+      for (const f of glHandlers['error'] ?? []) f({ error: { message: 'webgl lost' } });
+    });
+    const stored = localStorage.getItem(CONFIG.storageKeys.settings);
+    const perf = stored ? (JSON.parse(stored) as { perf?: boolean }).perf : false;
+    expect(perf).toBe(false); // the raster fallback is session-only
   });
 
   it('draws the route under the labels, with a casing for contrast', async () => {

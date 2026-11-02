@@ -26,8 +26,8 @@ const TABS: Array<{ id: Tab; label: string }> = [
 
 const STYLE_CHOICES: Array<{ id: MapStyle; label: string }> = [
   { id: 'auto', label: 'Auto' },
-  { id: 'light', label: 'Light' },
-  { id: 'dark', label: 'Dark' },
+  { id: 'light', label: 'Paper' },
+  { id: 'dark', label: 'Night' },
   { id: 'liberty', label: 'Classic' },
 ];
 

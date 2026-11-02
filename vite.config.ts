@@ -55,6 +55,11 @@ export default defineConfig({
       injectRegister: 'auto',
       includeAssets: ['favicon.svg', 'icons/icon-192.png', 'icons/icon-512.png'],
       workbox: {
+        // take over immediately and purge the previous build's precache, so a
+        // redesign is never hidden behind a stale service worker
+        skipWaiting: true,
+        clientsClaim: true,
+        cleanupOutdatedCaches: true,
         // maplibre-gl is ~900 kB uncompressed; keep headroom
         maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
         globPatterns: ['**/*.{js,css,html,svg,png,ico,woff2}'],

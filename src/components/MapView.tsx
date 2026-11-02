@@ -3,7 +3,8 @@ import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import type { Feature, LineString } from 'geojson';
 import { CONFIG, previewProxied, svcUrl, rewriteStyleUrls, styleUrlFor, type MapStyle } from '../config';
-import { buildBaseStyle } from '../lib/mapStyle';
+import { buildBaseStyle, type TileBase } from '../lib/mapStyle';
+import { chooseTileBase } from '../lib/tilebase';
 import type { Place, RouteResult } from '../types';
 import type { Theme } from '../hooks/useTheme';
 import { bearingDeg, circlePolygon, haversineM } from '../lib/geo';
@@ -90,6 +91,19 @@ export function MapView(props: MapViewProps) {
 
 const styleFor = (theme: Theme, mapStyle: MapStyle = 'auto') => styleUrlFor(theme, mapStyle);
 
+let tileBasePromise: Promise<TileBase | null> | null = null;
+
+/** resolved once per session: direct tile host first, same-origin proxy second */
+function resolveTileBase(): Promise<TileBase | null> {
+  if (!tileBasePromise) tileBasePromise = chooseTileBase();
+  return tileBasePromise;
+}
+
+/** a failed probe must not be remembered forever: "try again" re-runs it */
+export function forgetTileBase(): void {
+  tileBasePromise = null;
+}
+
 /**
  * Resolve the map style for a theme.
  *
@@ -97,37 +111,16 @@ const styleFor = (theme: Theme, mapStyle: MapStyle = 'auto') => styleUrlFor(them
  * plain object, so there is no style request at all and the first tiles can
  * start loading immediately. 'liberty' / 'bright' stay available as classic
  * OpenFreeMap styles (fetched once, then cached by the service worker).
- *
- * In the Arena preview (*.e2b.app) every absolute URL inside a style is
- * rewritten to the same-origin proxy, so nothing cross-origin is requested.
  */
 async function resolveStyle(theme: Theme, mapStyle: MapStyle = 'auto'): Promise<string | maplibregl.StyleSpecification> {
   if (mapStyle !== 'liberty' && mapStyle !== 'bright') {
     const base = mapStyle === 'dark' ? 'dark' : mapStyle === 'light' ? 'light' : theme;
-    const style = buildBaseStyle(base);
-    if (!previewProxied()) return style;
-    // preview: route every URL through /proxy — including the TileJSON's own
-    // absolute tile URLs, which would otherwise skip the proxy and be blocked
-    const proxied = rewriteStyleUrls(style);
-    const src = proxied.sources.openmaptiles as { url?: string; tiles?: string[]; minzoom?: number; maxzoom?: number };
-    if (src?.url) {
-      try {
-        const res = await fetch(src.url, { headers: { Accept: 'application/json' } });
-        if (res.ok) {
-          const tj = (await res.json()) as { tiles?: string[]; minzoom?: number; maxzoom?: number; attribution?: string };
-          if (Array.isArray(tj.tiles) && tj.tiles.length) {
-            src.tiles = tj.tiles.map((u) => svcUrl(u));
-            if (Number.isFinite(tj.minzoom)) src.minzoom = tj.minzoom;
-            if (Number.isFinite(tj.maxzoom)) src.maxzoom = tj.maxzoom;
-            delete src.url;
-          }
-        }
-      } catch {
-        /* keep url — MapLibre will still try the proxied TileJSON */
-      }
-    }
-    return proxied;
+    const tileBase = await resolveTileBase();
+    if (!tileBase) throw new Error('no tile server reachable');
+    return buildBaseStyle(base, tileBase);
   }
+  // classic styles are remote documents: proxy them in the preview, where the
+  // sandbox may be the only route to the host
   const url = styleFor(theme, mapStyle);
   if (!previewProxied()) return url;
   const res = await fetch(svcUrl(url), { headers: { Accept: 'application/json' } });
@@ -219,6 +212,8 @@ function GlMapView(props: MapViewProps) {
     if (!container) return;
     let cancelled = false;
     let map: maplibregl.Map | null = null;
+    // a fresh map (first mount, or after "try again") re-probes the tile host
+    forgetTileBase();
     onStatusRef.current?.('loading', undefined, 'gl');
     // if the style never loads, the map area stays blank — surface it
     const styleTimer = window.setTimeout(() => {
