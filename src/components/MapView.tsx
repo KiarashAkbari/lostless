@@ -19,6 +19,8 @@ export interface MapApi {
   getCenter: () => [number, number];
   zoomBy: (delta: number) => void;
   centerOn: (ll: [number, number], zoom?: number) => void;
+  /** frame a whole route, leaving the floating sheet and nav card visible */
+  fitRoute: (coords: [number, number][]) => void;
 }
 
 export type MapStatus = 'loading' | 'ready' | 'error';
@@ -196,17 +198,25 @@ function GlMapView(props: MapViewProps) {
           center: CONFIG.map.initialCenter,
           zoom: CONFIG.map.initialZoom,
           attributionControl: false,
-          // lite mode (older phones): flat, no world copies, instant fades
-          maxPitch: perfRef.current ? 0 : 65,
+          // 3D works in lite mode too (the nav angle is the point of nav mode);
+          // lite mode saves its GPU budget on blur, MSAA and pixel density
+          maxPitch: 65,
           maxZoom: perfRef.current ? 19 : 22,
           renderWorldCopies: false,
-          fadeDuration: perfRef.current ? 0 : 300,
+          // tiles appear the moment they arrive instead of fading in over 300 ms
+          // (that fade is what makes panning feel slow)
+          fadeDuration: 0,
           refreshExpiredTiles: false,
           dragRotate: false,
-          // rendering cost: no MSAA (big win on mobile GPUs), no drawing buffer
-          // preservation, and a bounded tile cache so memory stays flat
+          // cheaper label placement: one collision pass across sources
+          crossSourceCollisions: false,
+          // render at 2x at most — a 3x phone screen costs 2.25x the pixels for
+          // no visible gain over a map
+          pixelRatio: Math.min(window.devicePixelRatio || 1, perfRef.current ? 1.5 : 2),
+          // no MSAA (big win on mobile GPUs), no buffer preservation, bigger
+          // tile cache so panning back doesn't refetch
           canvasContextAttributes: { antialias: false, preserveDrawingBuffer: false, powerPreference: 'high-performance' },
-          maxTileCacheSize: perfRef.current ? 40 : 120,
+          maxTileCacheSize: perfRef.current ? 64 : 256,
           // the container has its own ResizeObserver below — skip MapLibre's
           trackResize: false,
         });
@@ -219,7 +229,7 @@ function GlMapView(props: MapViewProps) {
       if (!m || cancelled) return;
       m.addControl(
         new maplibregl.AttributionControl({ compact: true, customAttribution: OSM_ATTRIBUTION }),
-        'bottom-right',
+        'bottom-left',
       );
 
       // GPS accuracy bubble layer
@@ -261,6 +271,16 @@ function GlMapView(props: MapViewProps) {
         origTextFieldRef.current.clear();
       };
       applyLabelsRef.current = () => (faLabelsRef.current ? applyLabels() : restoreLabels());
+
+      // while the user drags the map, skip the big frosted panels' backdrop
+      // blur: compositing a live WebGL canvas through them is the expensive
+      // part. Only real gestures (originalEvent) toggle this, so the sat-nav
+      // camera easing does not flicker.
+      const setMoving = (on: boolean) => document.body.classList.toggle('map-moving', on);
+      m.on('movestart', (e) => {
+        if ((e as { originalEvent?: unknown }).originalEvent) setMoving(true);
+      });
+      m.on('moveend', () => setMoving(false));
 
       m.on('load', () => {
         styleLoadedRef.current = true;
@@ -341,6 +361,21 @@ function GlMapView(props: MapViewProps) {
           if (instantRef.current) m.jumpTo({ center: ll, zoom: z });
           else m.easeTo({ center: ll, zoom: z, duration: 500 });
         },
+        fitRoute: (coords: [number, number][]) => {
+          const pts = coords.filter((c) => Number.isFinite(c[0]) && Number.isFinite(c[1]));
+          if (!pts.length) return;
+          let [w, s0, e, n] = [Infinity, Infinity, -Infinity, -Infinity];
+          for (const [lon, lat] of pts) {
+            w = Math.min(w, lon); e = Math.max(e, lon);
+            s0 = Math.min(s0, lat); n = Math.max(n, lat);
+          }
+          const sheet = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--sheet-h')) || 0;
+          m.fitBounds([[w, s0], [e, n]], {
+            padding: { top: 96, right: 44, bottom: Math.round(sheet) + 28, left: 44 },
+            maxZoom: 16.5,
+            duration: instantRef.current ? 0 : 750,
+          });
+        },
       });
     });
 
@@ -351,6 +386,7 @@ function GlMapView(props: MapViewProps) {
       const m = map;
       if (m) (m as unknown as { __ro?: ResizeObserver }).__ro?.disconnect();
       if (m) m.remove();
+      document.body.classList.remove('map-moving');
       mapRef.current = null;
       styleLoadedRef.current = false;
     };
@@ -431,7 +467,49 @@ function GlMapView(props: MapViewProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.destination]);
 
-  // follow GPS while navigating (map rotates to the heading like a sat-nav)
+  // the sat-nav camera: tilted, rotated to the direction of travel, car pushed
+  // down the screen so most of what you see is the road ahead. A positive top
+  // padding moves the centre point below the middle of the viewport.
+  const navCamera = (map: maplibregl.Map, center?: [number, number], bearing?: number) => {
+    const h = map.getContainer?.().clientHeight || 0;
+    return {
+      ...(center ? { center } : {}),
+      zoom: Math.max(map.getZoom(), CONFIG.map.navigationZoom),
+      pitch: CONFIG.map.navPitch,
+      ...(bearing !== undefined && Number.isFinite(bearing) ? { bearing } : {}),
+      padding: { top: Math.round(h * 0.2), right: 0, bottom: 0, left: 0 },
+    };
+  };
+
+  // entering / leaving navigation mode tilts and flattens the map right away,
+  // without waiting for the first GPS step
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (!props.navigating) {
+      // drop the tilt and the nav offset, otherwise the map stays shifted
+      const flat = { pitch: 0, bearing: 0, padding: { top: 0, right: 0, bottom: 0, left: 0 } };
+      if (instantRef.current) {
+        map.jumpTo({ pitch: 0, bearing: 0 });
+        map.setPadding?.(flat.padding);
+      } else {
+        map.easeTo({ ...flat, duration: 550 });
+      }
+      lastFollowRef.current = null;
+      return;
+    }
+    const p = props.displayPos ?? props.pos;
+    const ok = p && Number.isFinite(p.coords.longitude) && Number.isFinite(p.coords.latitude);
+    const center: [number, number] | undefined = ok ? [p!.coords.longitude, p!.coords.latitude] : undefined;
+    const hd = p?.coords.heading;
+    const bearing = hd !== null && hd !== undefined && Number.isFinite(hd) ? hd : undefined;
+    const target = navCamera(map, center, bearing);
+    if (instantRef.current) map.jumpTo(target);
+    else map.easeTo({ ...target, duration: 900 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.navigating]);
+
+  // follow GPS while navigating (keeps the tilt, re-centres on movement)
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !props.navigating || !props.follow) return;
@@ -441,7 +519,7 @@ function GlMapView(props: MapViewProps) {
     if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) return;
     const last = lastFollowRef.current;
     if (last) {
-      const moved = Math.hypot((longitude - last[0]) * 111320 * Math.cos((latitude * Math.PI) / 180), (latitude - last[1]) * 110540);
+      const moved = haversineM(last, [longitude, latitude]);
       if (moved < 4) return;
     }
     lastFollowRef.current = [longitude, latitude];
@@ -453,33 +531,16 @@ function GlMapView(props: MapViewProps) {
         : movedBearing !== null && haversineM(last!, [longitude, latitude]) > 3
           ? movedBearing
           : map.getBearing();
-    // navigation mode: close-up + tilted 3D perspective, like a sat-nav.
-    // the bottom padding pushes the car below the horizon instead of dead-center
-    const target = {
-      center: [longitude, latitude] as [number, number],
-      zoom: Math.max(map.getZoom(), CONFIG.map.navigationZoom),
-      bearing,
-      pitch: CONFIG.map.navPitch,
-      padding: { top: 0, right: 0, bottom: Math.round((map.getContainer?.().clientHeight || 0) * 0.22), left: 0 },
-    };
+    const target = navCamera(map, [longitude, latitude], bearing);
     if (instantRef.current) {
       map.jumpTo(target);
     } else {
-      map.easeTo({ ...target, duration: 600 });
+      map.easeTo({ ...target, duration: 650 });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.pos, props.displayPos, props.navigating, props.follow]);
 
-  // leaving navigation mode → flatten the map back to top-down
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || props.navigating) return;
-    if (instantRef.current) map.jumpTo({ pitch: 0, bearing: 0 });
-    else map.easeTo({ pitch: 0, bearing: 0, duration: 500 });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.navigating]);
-
-  return <div className="map-container" ref={containerRef} data-testid="map" />;
+  return <div className={`map-container ${props.theme}${props.perf ? ' perf' : ''}`} ref={containerRef} data-testid="map" />;
 }
 
 const emptyLine: Feature<LineString> = {
@@ -494,5 +555,5 @@ const lineFeature = (coords: [number, number][]): Feature<LineString> => ({
 });
 
 function getCssVar(name: string): string {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || '#4da3ff';
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || '#eceded';
 }

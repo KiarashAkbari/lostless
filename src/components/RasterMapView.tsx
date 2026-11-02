@@ -31,7 +31,7 @@ export function RasterMapView(props: MapViewProps) {
   const toLatLng = (c: [number, number]): [number, number] => [c[1], c[0]];
   // read the theme accent so the raster map matches the GL map (styles.css)
   const accent = () =>
-    getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#4da3ff';
+    getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#eceded';
 
   // init
   useEffect(() => {
@@ -41,7 +41,8 @@ export function RasterMapView(props: MapViewProps) {
     try {
       map = L.map(containerRef.current, {
         zoomControl: false,
-        attributionControl: true,
+        // our own control, bottom-left, above the floating sheet
+        attributionControl: false,
         center: toLatLng(CONFIG.map.initialCenter),
         zoom: CONFIG.map.initialZoom,
         minZoom: 3,
@@ -50,6 +51,7 @@ export function RasterMapView(props: MapViewProps) {
       onStatusRef.current?.('error', err instanceof Error ? err.message : 'map init failed', 'raster');
       return;
     }
+    L.control.attribution({ position: 'bottomleft', prefix: false }).addTo(map);
     // in the Arena preview, tiles go through the same-origin proxy as well
     L.tileLayer(svcUrl(CONFIG.map.osmRasterUrl), {
       maxZoom: 19,
@@ -71,6 +73,12 @@ export function RasterMapView(props: MapViewProps) {
       zoomBy: (d: number) => map.setZoom(map.getZoom() + d),
       centerOn: (ll: [number, number], zoom?: number) =>
         map.setView(toLatLng(ll), zoom ?? Math.max(map.getZoom(), CONFIG.map.minFollowZoom), { animate: !reduced() }),
+      fitRoute: (coords: [number, number][]) => {
+        const pts = coords.filter((c) => Number.isFinite(c[0]) && Number.isFinite(c[1])).map(toLatLng);
+        if (!pts.length) return;
+        const sheet = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--sheet-h')) || 0;
+        map.fitBounds(L.latLngBounds(pts), { paddingTopLeft: [44, 96], paddingBottomRight: [44, Math.round(sheet) + 28], animate: !reduced() });
+      },
     });
     return () => {
       clearTimeout(t);
@@ -93,7 +101,7 @@ export function RasterMapView(props: MapViewProps) {
     if (!meRef.current) {
       const a = accent();
       meRef.current = L.circleMarker([latitude, longitude], {
-        radius: 7, color: '#0b0e12', weight: 2, fillColor: a, fillOpacity: 1,
+        radius: 7, color: '#08090a', weight: 2, fillColor: a, fillOpacity: 1,
       }).addTo(map);
       accRef.current = L.circle([latitude, longitude], {
         radius: acc, color: a, weight: 1, fillColor: a, fillOpacity: 0.08,

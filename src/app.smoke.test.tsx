@@ -31,6 +31,7 @@ const glMap = {
   setPaintProperty: vi.fn(),
   getZoom: () => 12,
   zoomTo: vi.fn(),
+  fitBounds: vi.fn(),
   easeTo: vi.fn(),
   jumpTo: vi.fn(),
   setStyle: vi.fn(),
@@ -194,12 +195,12 @@ describe('App smoke test', () => {
     const App = (await import('./App')).default;
     render(<App />);
     expect(screen.getByText(/lostless/i)).toBeTruthy();
-    expect(screen.getByLabelText('Search for a place')).toBeTruthy();
-    expect(screen.getByText(/tap the map to drop a pin/i)).toBeTruthy();
+    expect(screen.getByLabelText('Where to?')).toBeTruthy();
+    expect(screen.getByText(/tap the map to set a destination/i)).toBeTruthy();
     await waitFor(() => expect(glMap.on).toHaveBeenCalled());
     await fireMapLoad();
     // GPS banner should not be sticky after a fix arrives
-    await waitFor(() => expect(screen.getByText(/Location .*Locked/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/±12 m/)).toBeTruthy());
   });
 
   it('search → pick → route → START → STOP', async () => {
@@ -207,7 +208,7 @@ describe('App smoke test', () => {
     render(<App />);
     await fireMapLoad();
 
-    const input = screen.getByLabelText('Search for a place');
+    const input = screen.getByLabelText('Where to?');
     fireEvent.change(input, { target: { value: 'test plaza' } });
     fireEvent.submit(input.closest('form') as HTMLFormElement);
 
@@ -215,12 +216,12 @@ describe('App smoke test', () => {
     fireEvent.click(result);
 
     // route panel with stats + START appears after the (mocked) valhalla call
-    const start = await find(/Start navigation/);
+    const start = await find(/^Start$/);
     expect(screen.getByText(/Distance/)).toBeTruthy();
     fireEvent.click(start);
-    expect(await find(/Stop navigation/)).toBeTruthy();
+    expect(await find(/End navigation/)).toBeTruthy();
     // turn-by-turn list is in the sheet body
-    expect(await find(/Turn-by-turn/)).toBeTruthy();
+    expect(await find(/Directions/)).toBeTruthy();
   });
 
   it('tap on map → reverse geocode → pin → route', async () => {
@@ -229,7 +230,7 @@ describe('App smoke test', () => {
     await fireMapLoad();
     await fireMapTap(8.7, 50.12);
     expect(await find(/Tap Street 1/)).toBeTruthy();
-    expect(await find(/Start navigation/)).toBeTruthy();
+    expect(await find(/^Start$/)).toBeTruthy();
   });
 
   it('GPS denied shows a retry banner', async () => {
@@ -245,7 +246,7 @@ describe('App smoke test', () => {
     });
     const App = (await import('./App')).default;
     render(<App />);
-    expect(await find(/Location permission denied/)).toBeTruthy();
-    expect(screen.getByText('Retry')).toBeTruthy();
+    expect(await find(/Location is blocked/)).toBeTruthy();
+    expect(screen.getByText('Try again')).toBeTruthy();
   });
 });

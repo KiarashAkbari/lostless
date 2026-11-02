@@ -3,11 +3,11 @@ import { formatCoord } from '../lib/geo';
 import type { Theme } from '../hooks/useTheme';
 
 const GPS_LABEL: Record<GpsStatus, string> = {
-  locating: 'Searching…',
-  ok: 'Locked',
-  denied: 'Denied',
+  locating: 'Finding you…',
+  ok: '',
+  denied: 'Blocked',
   error: 'No signal',
-  unsupported: 'Unsupported',
+  unsupported: 'No GPS',
 };
 
 interface TopBarProps {
@@ -30,18 +30,16 @@ export function TopBar({ theme, onToggleTheme, onOpenSidebar, gpsStatus, onGpsRe
             <line x1="4" y1="7" x2="20" y2="7" /><line x1="4" y1="12" x2="20" y2="12" /><line x1="4" y1="17" x2="20" y2="17" />
           </svg>
         </button>
-        <div className="logo">
-          lostless<span className="cursor">_</span>
-        </div>
+        <div className="logo">lostless</div>
       </div>
       <div className="top-right">
         {!online && <span className="chip offline">Offline</span>}
         <button
           className={`chip gps ${gpsStatus}`}
           onClick={gpsClickable ? onGpsRetry : undefined}
-          title={gpsClickable ? 'Retry location' : 'GPS status'}
+          title={gpsClickable ? 'Try location again' : 'Location'}
         >
-          Location · {GPS_LABEL[gpsStatus]}
+          {GPS_LABEL[gpsStatus]}
           {gpsStatus === 'ok' && coords && (
             <span className="coords mono">
               {formatCoord(coords.latitude, coords.longitude)} ±{Math.round(coords.accuracy)} m

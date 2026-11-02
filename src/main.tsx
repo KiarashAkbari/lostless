@@ -1,7 +1,9 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
-// system font stacks only (see --sans/--mono in styles.css) — no webfont
-// downloads, so first paint and the map appear as early as possible
+// one typeface, two weights (Barlow: highway-signage heritage, ~44 kB total).
+// Numbers and coordinates fall back to the system mono — no extra download.
+import '@fontsource/barlow/400.css';
+import '@fontsource/barlow/600.css';
 import './styles.css';
 import App from './App';
 import { ErrorBoundary } from './components/ErrorBoundary';

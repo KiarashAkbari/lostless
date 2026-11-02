@@ -3,19 +3,19 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
-    <meta name="theme-color" content="#0b0e12" id="meta-theme-color" />
+    <meta name="theme-color" content="#08090a" id="meta-theme-color" />
     <meta name="color-scheme" content="dark light" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="description" content="lostless — a tiny personal navigation app. Free maps, free routing, no accounts." />
+    <meta name="description" content="lostless is a small, quiet map for getting from one place to another. Free, no account, no tracking." />
     <link rel="preconnect" href="https://tiles.openfreemap.org" crossorigin />
     <!-- inline critical paint: dark canvas from the very first frame (no white flash) -->
     <style>
-      html, body { margin: 0; background: #0b0e12; color: #e8eef5; }
-      html[data-theme='light'], html[data-theme='light'] body { background: #f4f6f8; color: #17202b; }
+      html, body { margin: 0; background: #08090a; color: #f0f1f1; }
+      html[data-theme='light'], html[data-theme='light'] body { background: #ececea; color: #121314; }
       #root { height: 100%; }
-      #boot { height: 100dvh; display: grid; place-items: center; font: 13px -apple-system, system-ui, sans-serif; opacity: .55 }
+      #boot { height: 100dvh; display: grid; place-items: center; font: 14px system-ui, sans-serif; opacity: .4 }
     </style>
     <link rel="dns-prefetch" href="https://nominatim.openstreetmap.org" />
     <link rel="dns-prefetch" href="https://valhalla1.openstreetmap.de" />
@@ -25,7 +25,7 @@
     <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="apple-touch-icon" href="./icons/icon-192.png" />
-    <title>lostless_</title>
+    <title>lostless</title>
   </head>
   <body>
     <div id="root"><div id="boot">Loading…</div></div>

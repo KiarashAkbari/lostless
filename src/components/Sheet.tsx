@@ -93,6 +93,16 @@ export function Sheet({ snap, onSnap, peek, body }: SheetProps) {
   };
 
   const h = height ?? 0;
+
+  // publish the sheet height so map controls / attribution can float above it
+  useEffect(() => {
+    const root = document.documentElement;
+    root.style.setProperty('--sheet-h', `${Math.max(0, Math.round(h))}px`);
+    return () => {
+      root.style.setProperty('--sheet-h', '0px');
+    };
+  }, [h]);
+
   return (
     <div
       className={`sheet${dragging ? ' dragging' : ''}${h === 0 ? ' collapsed' : ''}`}

@@ -26,7 +26,7 @@ const cap = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
 export function NavOverlay({ step, distToNextM, remainingM, remainingS, speedKmh, progress, mode, onStop }: NavOverlayProps) {
   // a route with zero steps still needs the overlay (stop button, ETA) — show a fallback card
   const glyph = step ? maneuverGlyph(step) : '◦';
-  const label = step ? cap(maneuverLabel(step)) : 'On the way';
+  const label = step ? cap(maneuverLabel(step)) : 'On your way';
   const street = step ? step.street || step.instruction : '';
   return (
     <div className="nav-overlay">
@@ -46,7 +46,7 @@ export function NavOverlay({ step, distToNextM, remainingM, remainingS, speedKmh
       <div className="nav-sub">
         <span>Arrive <span className="mono">{formatEta(remainingS)}</span></span>
         <span className="mono">{formatDuration(remainingS)}</span>
-        <span><span className="mono">{formatDistance(remainingM)}</span> left</span>
+        <span><span className="mono">{formatDistance(remainingM)}</span> to go</span>
         <span className="mono">{speedKmh !== null && Number.isFinite(speedKmh) ? `${Math.round(Math.max(0, speedKmh))} km/h` : '—'}</span>
       </div>
       <button className="btn stop nav-stop" onClick={onStop}>Stop</button>

@@ -178,9 +178,9 @@ OSM planet extracts for all of the above: [download.geofabrik.de](https://downlo
 ## Stack
 
 Vite + React + TypeScript, MapLibre GL JS, `vite-plugin-pwa` for the service worker,
-plain CSS (no framework). Zero webfont downloads — the UI uses the system Helvetica /
-system-ui stack, with ui-monospace reserved for numerals and coordinates. No backend,
-no database, no keys.
+plain CSS (no framework). One typeface, Barlow (two latin subsets, ~44 kB), with the
+system mono reserved for numerals and coordinates. Interface is frosted glass on matte
+black; panels float over a full-bleed map. No backend, no database, no keys.
 
 ## Project layout
 

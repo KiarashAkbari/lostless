@@ -23,13 +23,13 @@ export function SearchBox({ value, onChange, onSubmit, loading }: SearchBoxProps
         type="text"
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        placeholder="Search for a place"
-        aria-label="Search for a place"
+        placeholder="Where to?"
+        aria-label="Where to?"
         autoComplete="off"
         enterKeyHint="search"
       />
       <button type="submit" className="go" disabled={loading} aria-label="Search">
-        {loading ? '…' : 'Search'}
+        {loading ? '…' : 'Go'}
       </button>
     </form>
   );

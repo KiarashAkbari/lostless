@@ -55,10 +55,8 @@ export function Sidebar(props: SidebarProps) {
     <div className="scrim" onClick={onClose}>
       <aside className="sidebar" onClick={(e) => e.stopPropagation()} aria-label="Menu">
         <div className="sb-head">
-          <span className="logo">
-            lostless<span className="cursor">_</span>
-          </span>
-          <button className="icon-btn sb-close" onClick={onClose} aria-label="Close menu">×</button>
+          <span className="logo">lostless</span>
+          <button className="icon-btn sb-close" onClick={onClose} aria-label="Close">×</button>
         </div>
 
         <div className="seg" role="tablist" aria-label="Sidebar sections">
@@ -80,7 +78,7 @@ export function Sidebar(props: SidebarProps) {
             <div className="body-label">Saved places · {favorites.length}</div>
             {favorites.length === 0 && (
               <p className="dim sb-empty">
-                Nothing saved yet. Tap the star on a destination to keep it here.
+                Nothing saved yet. Tap the star on a place and it lands here.
               </p>
             )}
             <ul className="fav-list">
@@ -113,12 +111,12 @@ export function Sidebar(props: SidebarProps) {
               ))}
             </div>
             <div className="set-row">
-              <span className="set-label">Persian labels</span>
+              <span className="set-label">Persian place names</span>
               <Toggle on={settings.faLabels} onClick={() => set({ faLabels: !settings.faLabels })} label="Toggle Persian map labels" />
             </div>
             <div className="body-label" style={{ marginTop: 16 }}>Navigation</div>
             <div className="set-row">
-              <span className="set-label">Voice guidance{speechSupported() ? '' : ' (not available here)'}</span>
+              <span className="set-label">Voice{speechSupported() ? '' : ' (not supported here)'}</span>
               <Toggle on={settings.voice && speechSupported()} onClick={() => set({ voice: !settings.voice })} label="Toggle voice guidance" />
             </div>
             <div className="set-row">
@@ -126,7 +124,7 @@ export function Sidebar(props: SidebarProps) {
               <Toggle on={settings.perf} onClick={() => set({ perf: !settings.perf })} label="Toggle lite mode" />
             </div>
             <p className="dim sb-note">
-              Lite mode uses lightweight raster tiles and no animations — smoother on older phones.
+              Lite mode draws a simpler map and drops the blur. It runs better on older phones.
             </p>
           </div>
         )}
@@ -135,16 +133,16 @@ export function Sidebar(props: SidebarProps) {
           <div className="sb-body">
             <div className="body-label">About</div>
             <p className="sb-text">
-              lostless is a tiny personal navigator. 100% free, no accounts, no API keys, no tracking.
+              A small map for getting from one place to another. No account, no key, no tracking.
             </p>
             <p className="sb-text dim">
-              Map data © OpenStreetMap contributors — the same open base map that Neshan and Balad build on.
-              Tiles: OpenFreeMap · search: Nominatim · routing: public Valhalla / OSRM.
+              Maps come from OpenStreetMap, tiles from OpenFreeMap, routes from Valhalla and OSRM.
+              All of them are free and public.
             </p>
             <p className="sb-text dim">
-              Navigation UI inspired by Neshan and Balad: big next-turn card, ETA, speed, voice.
+              Built for one hand and a car mount: next turn, time left, speed, voice.
             </p>
-            <p className="sb-text dim mono">Version {APP_VERSION} · PWA · works offline for cached tiles</p>
+            <p className="sb-text dim mono">Version {APP_VERSION} · works offline with saved tiles</p>
           </div>
         )}
       </aside>

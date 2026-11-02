@@ -13,7 +13,7 @@ import { NavOverlay } from './components/NavOverlay';
 import { MapButtons } from './components/MapButtons';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Sidebar } from './components/Sidebar';
-import type { MapApi, MapRenderer, MapStatus } from './components/MapView';
+import type { MapApi, MapStatus } from './components/MapView';
 import { searchPlaces, reverseGeocode } from './lib/geocode';
 import { getRoute } from './lib/routing';
 import { nearestOnPolyline, formatCoord, formatDistance, haversineM } from './lib/geo';
@@ -55,8 +55,6 @@ export default function App() {
   const [nav, setNav] = useState<NavState | null>(null);
   const [remainingCoords, setRemainingCoords] = useState<[number, number][] | null>(null);
   const [online, setOnline] = useState<boolean>(navigator.onLine);
-  const [mapStatus, setMapStatus] = useState<MapStatus>('loading');
-  const [mapRenderer, setMapRenderer] = useState<MapRenderer>('gl');
   const [mapKey, setMapKey] = useState(0); // bump to re-mount the map (retry)
   const [sidebarOpen, setSidebarOpen] = useState(false);
   // while navigating: no smoothing — the raw max-precision fix is shown
@@ -114,30 +112,30 @@ export default function App() {
     if (online) {
       clearTags('net');
     } else {
-      pushBanner('error', 'You are offline — cached tiles only, routing and search unavailable', { tag: 'net', sticky: true });
+      pushBanner('error', "You're offline. Cached tiles still show, but search and routing are paused.", { tag: 'net', sticky: true });
     }
   }, [online, pushBanner, clearTags]);
 
   // ── GPS status banners ─────────────────────────────────────────────────────
   useEffect(() => {
     if (geo.status === 'denied') {
-      pushBanner('error', 'Location permission denied — allow location for this site in the browser, then retry', {
+      pushBanner('error', 'Location is blocked. Allow it for this site in your browser settings, then try again.', {
         tag: 'gps',
         sticky: true,
-        action: { label: 'Retry', onClick: geo.retry },
+        action: { label: 'Try again', onClick: geo.retry },
       });
     } else if (geo.status === 'error') {
-      pushBanner('error', 'GPS signal lost — retrying automatically', {
+      pushBanner('error', 'Lost the GPS signal. Reconnecting…', {
         tag: 'gps',
         sticky: true,
-        action: { label: 'Retry', onClick: geo.retry },
+        action: { label: 'Try again', onClick: geo.retry },
       });
     } else if (geo.status === 'unsupported') {
-      pushBanner('error', 'Geolocation is not supported by this browser — routes start from the map center', { tag: 'gps', sticky: true });
+      pushBanner('error', "This browser can't share your location. Routes will start from the middle of the map.", { tag: 'gps', sticky: true });
     } else if (geo.status === 'locating') {
       // no fix yet — after a while, tell the user what might be wrong
       const t = setTimeout(() => {
-        pushBanner('info', 'GPS still searching… turn on location (high accuracy) and try outdoors', { tag: 'gps-slow' });
+        pushBanner('info', 'Still looking for a fix. It helps to be outside or near a window.', { tag: 'gps-slow' });
       }, 10000);
       return () => clearTimeout(t);
     } else {
@@ -160,6 +158,8 @@ export default function App() {
         setRouteStatus('ok');
         setNav(null);
         setRemainingCoords(null);
+        // show the whole route, but never yank the camera mid-navigation
+        if (!navigatingRef.current) mapApi.current?.fitRoute(r.coords);
       } catch (err) {
         if (reqId !== routeReqId.current) return;
         setRoute(null);
@@ -167,13 +167,13 @@ export default function App() {
         pushBanner(
           'error',
           navigator.onLine
-            ? 'ROUTING SERVER UNREACHABLE OR NO ROUTE — RETRY, OR SWITCH SERVER IN src/config.ts'
-            : 'OFFLINE — CANNOT CALCULATE ROUTE',
+            ? "No route came back. The routing server may be busy, so try again in a moment."
+            : "You're offline, so a route can't be calculated right now.",
           {
             tag: 'route',
-            sticky: true, // stays until fixed — it carries a RETRY action
+            sticky: true, // stays until fixed - it carries a retry action
             action: {
-              label: 'Retry',
+              label: 'Try again',
               onClick: () => {
                 if (destRef.current) void fetchRoute(destRef.current, modeRef.current);
               },
@@ -214,14 +214,14 @@ export default function App() {
       setResults(r);
       setSearchStatus('idle');
       if (r.length > 0) setSnap('full');
-      else pushBanner('info', 'No results — try another name or a city');
+      else pushBanner('info', 'Nothing found. Try a street, a shop or a town.');
     } catch {
       setResults([]);
       setSearchStatus('error');
-      pushBanner('error', 'Search failed — Nominatim unreachable (or offline)', {
+      pushBanner('error', "Search isn't answering. Check your connection and try again.", {
         tag: 'search',
         sticky: true,
-        action: { label: 'Retry', onClick: () => void onSearchRef.current() },
+        action: { label: 'Try again', onClick: () => void onSearchRef.current() },
       });
     }
   }, [query, searchStatus, pushBanner]);
@@ -262,6 +262,7 @@ export default function App() {
     setDisplayPos(null);
     setSpeedKmh(null);
     cancelSpeech();
+    setSnap('peek'); // the trip is over: bring the route card back
   }, []);
 
   // voice guidance: speak the next maneuver whenever the step changes
@@ -291,7 +292,7 @@ export default function App() {
     let removeListener = () => {};
     void acquireWakeLock().then((ok) => {
       if (!ok && !wakeLockSupported()) {
-        pushBanner('info', 'Screen wake lock is not supported here — the screen may sleep while navigating');
+        pushBanner('info', 'Your screen may turn off while you navigate.');
       }
       removeListener = reacquireOnVisible();
     });
@@ -348,7 +349,7 @@ export default function App() {
       offRouteCount.current += 1;
       if (offRouteCount.current >= CONFIG.reroute.consecutiveFixes && destRef.current) {
         offRouteCount.current = 0;
-        pushBanner('info', 'Off route — rerouting…');
+        pushBanner('info', 'Off the route. Finding a new one…');
         void fetchRoute(destRef.current, modeRef.current);
       }
     } else {
@@ -370,52 +371,46 @@ export default function App() {
       // no fix yet: nothing to center on — arm follow mode so the map snaps to
       // the user as soon as the first fix arrives
       setFollow(true);
-      pushBanner('info', 'No GPS fix yet — follow armed, map centers when GPS locks', { tag: 'recenter' });
+      pushBanner('info', 'No fix yet. The map will jump to you as soon as there is one.', { tag: 'recenter' });
     }
   }, [pushBanner]);
 
   const onMapStatus = useCallback(
-    (s: MapStatus, msg?: string, renderer?: MapRenderer) => {
-      if (renderer) setMapRenderer(renderer);
-      setMapStatus(s);
+    (s: MapStatus, msg?: string) => {
       if (s === 'error') {
         // the GL map failed (blank) — fall back to the raster map automatically, once
         if (!forceRaster && !autoRasterTried.current) {
           autoRasterTried.current = true;
           updateSettings({ ...settings, perf: true });
-          setMapStatus('loading');
           setMapKey((k) => k + 1);
-          pushBanner('info', `Map rendering unavailable (${msg ?? 'unknown'}) — switched to the lite raster map`, {
+          pushBanner('info', `The 3D map isn't available (${msg ?? 'unknown reason'}). Showing the simple map instead.`, {
             tag: 'map',
             sticky: true,
             action: {
-              label: 'Retry',
+              label: 'Try again',
               onClick: () => {
                 autoRasterTried.current = false;
                 updateSettings({ ...settings, perf: false });
-                setMapStatus('loading');
-                setMapKey((k) => k + 1);
+                      setMapKey((k) => k + 1);
               },
             },
           });
           return;
         }
-        pushBanner('error', `Map failed to load (${msg ?? 'unknown'}) — check connection or WebGL`, {
+        pushBanner('error', `The map didn't load (${msg ?? 'unknown reason'}). Check your connection and try again.`, {
           tag: 'map',
           sticky: true,
           action: {
-            label: 'Retry',
+            label: 'Try again',
             onClick: () => {
-              setMapStatus('loading');
-              setMapKey((k) => k + 1);
+                  setMapKey((k) => k + 1);
             },
           },
           action2: {
-            label: 'USE RASTER MAP',
+            label: 'Use simple map',
             onClick: () => {
               updateSettings({ ...settings, perf: true });
-              setMapStatus('loading');
-              setMapKey((k) => k + 1);
+                  setMapKey((k) => k + 1);
             },
           },
         });
@@ -450,7 +445,7 @@ export default function App() {
       ) : (
         <div className="hint-panel">
           <p className="dim">
-            Tap the map to drop a pin, or search for a place above.
+            Tap the map to set a destination, or search for a place.
           </p>
           {favorites.length > 0 && (
             <div className="fav-chips">
@@ -469,7 +464,7 @@ export default function App() {
   const bodyContent = (
     <>
       {searchStatus === 'loading' && <div className="body-note dim">Searching…</div>}
-      {searchStatus === 'error' && <div className="body-note err">Search failed — check your connection.</div>}
+      {searchStatus === 'error' && <div className="body-note err">Search isn't answering. Check your connection.</div>}
       {results.length > 0 && (
         <ul className="results">
           {results.map((r) => (
@@ -484,7 +479,7 @@ export default function App() {
       )}
       {results.length === 0 && route && routeStatus === 'ok' && (
         <>
-          <div className="body-label">Turn-by-turn · {route.steps.length} steps</div>
+          <div className="body-label">Directions · {route.steps.length} steps</div>
           <StepsList steps={route.steps} current={navigating && nav ? nav.stepIndex : null} />
         </>
       )}
@@ -509,7 +504,7 @@ export default function App() {
             </>
           )}
           <div className="body-label dim footer-note">
-            Map data © OpenStreetMap contributors · tiles OpenFreeMap (fallback: OSM raster) · routing Valhalla/OSRM — all free public services.
+            Map data © OpenStreetMap. Tiles by OpenFreeMap. Routing by Valhalla and OSRM.
           </div>
         </>
       )}
@@ -595,10 +590,6 @@ export default function App() {
             onStop={stopNav}
           />
         )}
-
-        <div className={`map-status${mapStatus === 'error' ? ' err' : ''}`}>
-          Map · <span className="mono">{mapStatus === 'ready' ? (mapRenderer === 'raster' ? 'raster' : 'vector') : mapStatus === 'loading' ? 'loading…' : 'error — see banner'}</span>
-        </div>
 
         <MapButtons
           follow={follow}
