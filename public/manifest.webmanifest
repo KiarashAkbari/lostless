@@ -1,14 +1,14 @@
 {
-  "name": "lostless — personal nav",
+  "name": "lostless",
   "short_name": "lostless",
-  "description": "Tiny personal navigation app. Free maps, free routing, no accounts, no keys.",
+  "description": "A small, quiet map for getting from one place to another.",
   "id": "./",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#0b0e12",
-  "theme_color": "#0b0e12",
+  "background_color": "#08090a",
+  "theme_color": "#08090a",
   "icons": [
     {
       "src": "./icons/icon-192.png",

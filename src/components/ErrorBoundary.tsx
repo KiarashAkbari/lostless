@@ -19,7 +19,7 @@ export class ErrorBoundary extends Component<Props, State> {
     if (this.state.error) {
       return (
         <div className="error-fallback">
-          <div className="ef-title">lostless_ ran into a problem</div>
+          <div className="ef-title">Something broke</div>
           <div className="ef-msg mono">{this.state.error.message}</div>
           <button className="btn primary" onClick={() => window.location.reload()}>
             Reload

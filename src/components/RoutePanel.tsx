@@ -30,17 +30,17 @@ export function RoutePanel(props: RoutePanelProps) {
       <div className="route-dest">
         <span className="dest-pin" aria-hidden>◆</span>
         <span className="dest-name" title={destination.name}>{destination.name}</span>
-        <button className={`icon-btn${isFav ? ' fav' : ''}`} onClick={onToggleFav} title={isFav ? 'Remove from saved' : 'Save place'} aria-label="Toggle favorite">
+        <button className={`icon-btn${isFav ? ' fav' : ''}`} onClick={onToggleFav} title={isFav ? 'Remove from saved' : 'Save this place'} aria-label="Toggle favorite">
           {isFav ? '★' : '☆'}
         </button>
-        <button className="icon-btn" onClick={onClear} title="Clear destination" aria-label="Clear destination">×</button>
+        <button className="icon-btn" onClick={onClear} title="Clear" aria-label="Clear destination">×</button>
       </div>
 
-      {routeStatus === 'loading' && <div className="dim route-note">Calculating route<span className="dots">…</span></div>}
+      {routeStatus === 'loading' && <div className="dim route-note">Working out the route<span className="dots">…</span></div>}
       {routeStatus === 'error' && (
         <div className="route-note err">
-          Route failed — server down or no route found
-          <button className="mini-btn" onClick={onRetry}>Retry</button>
+          No route came back. The server may be busy.
+          <button className="mini-btn" onClick={onRetry}>Try again</button>
         </div>
       )}
 
@@ -59,9 +59,9 @@ export function RoutePanel(props: RoutePanelProps) {
             ))}
           </div>
           {navigating ? (
-            <button className="btn primary stop" onClick={onStop}>Stop navigation</button>
+            <button className="btn primary stop" onClick={onStop}>End navigation</button>
           ) : (
-            <button className="btn primary" onClick={onStart}>Start navigation</button>
+            <button className="btn primary" onClick={onStart}>Start</button>
           )}
         </>
       )}
