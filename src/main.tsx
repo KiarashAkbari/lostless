@@ -2,8 +2,8 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 // one typeface, two weights (Barlow: highway-signage heritage, ~44 kB total).
 // Numbers and coordinates fall back to the system mono — no extra download.
-import '@fontsource/barlow/400.css';
-import '@fontsource/barlow/600.css';
+import '@fontsource/barlow/latin-400.css';
+import '@fontsource/barlow/latin-600.css';
 import './styles.css';
 import App from './App';
 import { ErrorBoundary } from './components/ErrorBoundary';
