@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { GpsStatus } from '../types';
-import { haversineM } from '../lib/geo';
+import { smoothPosition } from '../lib/navmath';
 
 export interface GeoState {
   status: GpsStatus;
@@ -36,16 +36,10 @@ export function useGeolocation(): GeoState {
         const accuracy = Number.isFinite(c.accuracy) && c.accuracy > 0 ? c.accuracy : 50;
         const speed = Number.isFinite(c.speed) ? c.speed : null;
         const heading = Number.isFinite(c.heading) ? c.heading : null;
-        const prev = smoothRef.current;
-        let lat = c.latitude;
-        let lon = c.longitude;
-        if (prev) {
-          const moved = haversineM([prev.lon, prev.lat], [c.longitude, c.latitude]);
-          // strong signal + big jump → trust the new fix; weak signal → smooth harder
-          const alpha = accuracy > 60 ? 0.8 : moved > 25 ? 0.7 : moved > 3 ? 0.45 : 0.2;
-          lat = prev.lat + (c.latitude - prev.lat) * alpha;
-          lon = prev.lon + (c.longitude - prev.lon) * alpha;
-        }
+        // smoothing lives in lib/navmath (unit-tested): weak signal smooths
+        // harder, strong signal + big jump trusts the new fix
+        const smoothedPos = smoothPosition(smoothRef.current, c.latitude, c.longitude, accuracy);
+        const { lat, lon } = smoothedPos;
         smoothRef.current = { lat, lon };
         const smoothed = {
           ...p,

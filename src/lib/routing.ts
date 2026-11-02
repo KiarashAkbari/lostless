@@ -2,6 +2,7 @@ import { CONFIG, svcUrl, type TravelMode } from '../config';
 import type { RouteResult, RouteStep } from '../types';
 import { decodePolyline } from './geo';
 import { maneuverLabel } from './maneuvers';
+import { createThrottler } from './throttle';
 
 const cap = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
 
@@ -16,20 +17,25 @@ const cap = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
  */
 
 // FOSSGIS allows 1 call/user/sec — throttle all routing requests client-side
-let lastRouteAt = 0;
-async function throttled<T>(fn: () => Promise<T>): Promise<T> {
-  const wait = Math.max(0, CONFIG.routing.minIntervalMs - (Date.now() - lastRouteAt));
-  if (wait > 0) await new Promise((r) => setTimeout(r, wait));
-  lastRouteAt = Date.now();
-  return fn();
+// (shared throttler; interval read lazily so CONFIG/tests can change it)
+const throttled = createThrottler(() => CONFIG.routing.minIntervalMs);
+
+/** HTTP error with a status, so callers can tell 4xx (don't retry) from 5xx (retry elsewhere) */
+class HttpError extends Error {
+  readonly status: number;
+  constructor(status: number) {
+    super(`HTTP ${status}`);
+    this.name = 'HttpError';
+    this.status = status;
+  }
 }
 
 async function fetchJson(url: string): Promise<unknown> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), CONFIG.routing.timeoutMs);
   try {
-    const res = await fetch(url, { signal: ctrl.signal, headers: { Accept: 'application/json' } });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const res = await fetch(url, { signal: ctrl.signal, headers: { Accept: 'application/json' }, credentials: 'omit' });
+    if (!res.ok) throw new HttpError(res.status);
     return await res.json();
   } finally {
     clearTimeout(timer);
@@ -112,8 +118,10 @@ async function routeValhalla(mode: TravelMode, from: [number, number], to: [numb
   try {
     return await routeValhallaOnce(CONFIG.routing.valhalla.baseUrl, mode, from, to);
   } catch (err) {
-    // only retry the fallback host on network-level failures, not "no route"
-    if (err instanceof Error && err.message.startsWith('HTTP 4')) throw err;
+    // Only retry the fallback host on network-level failures or 5xx — never on
+    // 4xx ("no route" / bad request would just fail again on the other host).
+    if (err instanceof HttpError && err.status < 500) throw err;
+    if (err instanceof Error && err.message.startsWith('valhalla:')) throw err;
     if (CONFIG.routing.valhalla.fallbackBaseUrl) {
       return routeValhallaOnce(CONFIG.routing.valhalla.fallbackBaseUrl, mode, from, to);
     }
