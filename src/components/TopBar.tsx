@@ -39,7 +39,7 @@ export function TopBar({ theme, onToggleTheme, onOpenSidebar, gpsStatus, onGpsRe
           onClick={gpsClickable ? onGpsRetry : undefined}
           title={gpsClickable ? 'Try location again' : 'Location'}
         >
-          {GPS_LABEL[gpsStatus]}
+          {gpsStatus === 'ok' && coords ? null : GPS_LABEL[gpsStatus]}
           {gpsStatus === 'ok' && coords && (
             <span className="coords mono">
               {formatCoord(coords.latitude, coords.longitude)} ±{Math.round(coords.accuracy)} m
