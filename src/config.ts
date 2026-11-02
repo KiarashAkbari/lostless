@@ -41,7 +41,10 @@ export const CONFIG = {
     /** Frankfurt am Main — change to your home town. [lon, lat] */
     initialCenter: [8.6821, 50.1109] as [number, number],
     initialZoom: 12.5,
-    navigationZoom: 17.5,
+    /** while navigating: close-up driving view */
+    navigationZoom: 18,
+    /** 3D tilt while navigating (sat-nav perspective) */
+    navPitch: 60,
     /** don't auto-follow the GPS dot closer than this */
     minFollowZoom: 15,
   },

@@ -18,12 +18,18 @@ interface SidebarProps {
   onRemoveFav: (id: string) => void;
 }
 
+const TABS: Array<{ id: Tab; label: string }> = [
+  { id: 'saved', label: 'Saved' },
+  { id: 'settings', label: 'Settings' },
+  { id: 'about', label: 'About' },
+];
+
 const STYLE_CHOICES: Array<{ id: MapStyle; label: string }> = [
-  { id: 'auto', label: 'AUTO' },
-  { id: 'dark', label: 'DARK' },
-  { id: 'light', label: 'LIGHT' },
-  { id: 'liberty', label: 'LIBERTY' },
-  { id: 'bright', label: 'BRIGHT' },
+  { id: 'auto', label: 'Auto' },
+  { id: 'dark', label: 'Dark' },
+  { id: 'light', label: 'Light' },
+  { id: 'liberty', label: 'Liberty' },
+  { id: 'bright', label: 'Bright' },
 ];
 
 function Toggle({ on, onClick, label }: { on: boolean; onClick: () => void; label: string }) {
@@ -36,7 +42,7 @@ function Toggle({ on, onClick, label }: { on: boolean; onClick: () => void; labe
 
 /**
  * Slide-in side drawer: saved places, settings (theme, voice, lite mode,
- * Persian labels, map style), about. Curved glass panel, phone-first.
+ * Persian labels, map style), about. Segmented tabs, sentence-case labels.
  */
 export function Sidebar(props: SidebarProps) {
   const { open, onClose, theme, onToggleTheme, settings, onSettings, favorites, onPick, onRemoveFav } = props;
@@ -47,30 +53,34 @@ export function Sidebar(props: SidebarProps) {
 
   return (
     <div className="scrim" onClick={onClose}>
-      <aside className="sidebar" onClick={(e) => e.stopPropagation()} aria-label="menu">
+      <aside className="sidebar" onClick={(e) => e.stopPropagation()} aria-label="Menu">
         <div className="sb-head">
-          <span className="logo mono">
+          <span className="logo">
             lostless<span className="cursor">_</span>
           </span>
-          <button className="icon-btn mono sb-close" onClick={onClose} aria-label="close menu">×</button>
+          <button className="icon-btn sb-close" onClick={onClose} aria-label="Close menu">×</button>
         </div>
 
-        <div className="seg mono" role="tablist" aria-label="sidebar sections">
-          {(['saved', 'settings', 'about'] as const).map((t) => (
-            <button key={t} role="tab" aria-selected={tab === t} className={tab === t ? 'active' : ''} onClick={() => setTab(t)}>
-              {t.toUpperCase()}
+        <div className="seg" role="tablist" aria-label="Sidebar sections">
+          {TABS.map((t) => (
+            <button
+              key={t.id}
+              role="tab"
+              aria-selected={tab === t.id}
+              className={tab === t.id ? 'active' : ''}
+              onClick={() => setTab(t.id)}
+            >
+              {t.label}
             </button>
           ))}
         </div>
 
         {tab === 'saved' && (
           <div className="sb-body">
-            <div className="body-label mono dim">SAVED PLACES // {favorites.length}</div>
+            <div className="body-label">Saved places · {favorites.length}</div>
             {favorites.length === 0 && (
-              <p className="mono dim sb-empty">
-                NOTHING SAVED YET
-                <br />
-                TAP ★ ON A DESTINATION TO KEEP IT HERE
+              <p className="dim sb-empty">
+                Nothing saved yet. Tap the star on a destination to keep it here.
               </p>
             )}
             <ul className="fav-list">
@@ -80,7 +90,7 @@ export function Sidebar(props: SidebarProps) {
                     <span className="r-name">{f.name}</span>
                     <span className="r-kind mono">{f.kind ?? 'place'}</span>
                   </button>
-                  <button className="icon-btn mono" onClick={() => onRemoveFav(f.id)} aria-label={`remove ${f.name.split(',')[0]}`}>×</button>
+                  <button className="icon-btn" onClick={() => onRemoveFav(f.id)} aria-label={`Remove ${f.name.split(',')[0]}`}>×</button>
                 </li>
               ))}
             </ul>
@@ -89,13 +99,13 @@ export function Sidebar(props: SidebarProps) {
 
         {tab === 'settings' && (
           <div className="sb-body">
-            <div className="body-label mono dim">APPEARANCE</div>
+            <div className="body-label">Appearance</div>
             <div className="set-row">
-              <span className="set-label">{theme === 'dark' ? 'DARK MODE' : 'LIGHT MODE'}</span>
-              <Toggle on={theme === 'dark'} onClick={onToggleTheme} label="toggle dark mode" />
+              <span className="set-label">Dark mode</span>
+              <Toggle on={theme === 'dark'} onClick={onToggleTheme} label="Toggle dark mode" />
             </div>
-            <div className="body-label mono dim" style={{ marginTop: 14 }}>MAP</div>
-            <div className="seg wrap mono" role="group" aria-label="map style">
+            <div className="body-label" style={{ marginTop: 16 }}>Map style</div>
+            <div className="seg wrap" role="group" aria-label="Map style">
               {STYLE_CHOICES.map((c) => (
                 <button key={c.id} className={settings.mapStyle === c.id ? 'active' : ''} onClick={() => set({ mapStyle: c.id })}>
                   {c.label}
@@ -103,38 +113,38 @@ export function Sidebar(props: SidebarProps) {
               ))}
             </div>
             <div className="set-row">
-              <span className="set-label">PERSIAN LABELS (FA)</span>
-              <Toggle on={settings.faLabels} onClick={() => set({ faLabels: !settings.faLabels })} label="toggle Persian map labels" />
+              <span className="set-label">Persian labels</span>
+              <Toggle on={settings.faLabels} onClick={() => set({ faLabels: !settings.faLabels })} label="Toggle Persian map labels" />
             </div>
-            <div className="body-label mono dim" style={{ marginTop: 14 }}>NAVIGATION</div>
+            <div className="body-label" style={{ marginTop: 16 }}>Navigation</div>
             <div className="set-row">
-              <span className="set-label">VOICE GUIDANCE{speechSupported() ? '' : ' (N/A HERE)'}</span>
-              <Toggle on={settings.voice && speechSupported()} onClick={() => set({ voice: !settings.voice })} label="toggle voice guidance" />
+              <span className="set-label">Voice guidance{speechSupported() ? '' : ' (not available here)'}</span>
+              <Toggle on={settings.voice && speechSupported()} onClick={() => set({ voice: !settings.voice })} label="Toggle voice guidance" />
             </div>
             <div className="set-row">
-              <span className="set-label">LITE MODE — OLDER PHONES</span>
-              <Toggle on={settings.perf} onClick={() => set({ perf: !settings.perf })} label="toggle lite mode" />
+              <span className="set-label">Lite mode</span>
+              <Toggle on={settings.perf} onClick={() => set({ perf: !settings.perf })} label="Toggle lite mode" />
             </div>
-            <p className="mono dim sb-note">
-              LITE MODE USES LIGHTWEIGHT RASTER TILES + NO ANIMATIONS — SMOOTH ON OLDER HARDWARE.
+            <p className="dim sb-note">
+              Lite mode uses lightweight raster tiles and no animations — smoother on older phones.
             </p>
           </div>
         )}
 
         {tab === 'about' && (
           <div className="sb-body">
-            <div className="body-label mono dim">ABOUT</div>
+            <div className="body-label">About</div>
             <p className="sb-text">
               lostless is a tiny personal navigator. 100% free, no accounts, no API keys, no tracking.
             </p>
-            <p className="sb-text mono dim">
-              MAP DATA © OPENSTREETMAP CONTRIBUTORS — THE SAME OPEN BASE MAP THAT NESHAN &amp; BALAD BUILD ON.
-              TILES: OPENFREEMAP · SEARCH: NOMINATIM · ROUTING: PUBLIC VALHALLA / OSRM.
+            <p className="sb-text dim">
+              Map data © OpenStreetMap contributors — the same open base map that Neshan and Balad build on.
+              Tiles: OpenFreeMap · search: Nominatim · routing: public Valhalla / OSRM.
             </p>
-            <p className="sb-text mono dim">
-              NAV UI INSPIRED BY NESHAN / BALAD: BIG NEXT-TURN CARD, ETA, SPEED, VOICE.
+            <p className="sb-text dim">
+              Navigation UI inspired by Neshan and Balad: big next-turn card, ETA, speed, voice.
             </p>
-            <p className="sb-text mono dim">VERSION {APP_VERSION} · PWA · WORKS OFFLINE FOR CACHED TILES</p>
+            <p className="sb-text dim mono">Version {APP_VERSION} · PWA · works offline for cached tiles</p>
           </div>
         )}
       </aside>

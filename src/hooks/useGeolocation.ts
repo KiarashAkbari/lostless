@@ -9,16 +9,20 @@ export interface GeoState {
 }
 
 /**
- * Watches the GPS position with high accuracy and lightly smooths it
- * (exponential moving average) so the blue dot doesn't jitter on screen.
+ * Watches the GPS position with maximum precision (high accuracy, no cached
+ * fixes: maximumAge 0). When `smooth` is on (browsing), positions are lightly
+ * smoothed (exponential moving average) so the dot doesn't jitter; while
+ * navigating pass `smooth=false` to get the raw fix at max precision.
  * `retry` re-requests permission. Raw heading/accuracy/speed always come
  * from the latest fix.
  */
-export function useGeolocation(): GeoState {
+export function useGeolocation(smooth = true): GeoState {
   const [status, setStatus] = useState<GpsStatus>('locating');
   const [pos, setPos] = useState<GeolocationPosition | null>(null);
   const watchId = useRef<number | null>(null);
   const smoothRef = useRef<{ lat: number; lon: number } | null>(null);
+  const smoothOnRef = useRef(smooth);
+  smoothOnRef.current = smooth;
 
   const start = useCallback(() => {
     if (!('geolocation' in navigator)) {
@@ -37,9 +41,11 @@ export function useGeolocation(): GeoState {
         const speed = Number.isFinite(c.speed) ? c.speed : null;
         const heading = Number.isFinite(c.heading) ? c.heading : null;
         // smoothing lives in lib/navmath (unit-tested): weak signal smooths
-        // harder, strong signal + big jump trusts the new fix
-        const smoothedPos = smoothPosition(smoothRef.current, c.latitude, c.longitude, accuracy);
-        const { lat, lon } = smoothedPos;
+        // harder, strong signal + big jump trusts the new fix. While navigating
+        // (smoothOn=false) we keep the raw fix — max precision on screen.
+        const { lat, lon } = smoothOnRef.current
+          ? smoothPosition(smoothRef.current, c.latitude, c.longitude, accuracy)
+          : { lat: c.latitude, lon: c.longitude };
         smoothRef.current = { lat, lon };
         const smoothed = {
           ...p,

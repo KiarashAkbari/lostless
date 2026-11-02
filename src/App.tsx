@@ -39,7 +39,6 @@ interface NavState {
 
 export default function App() {
   const { theme, toggle: toggleTheme } = useTheme();
-  const geo = useGeolocation();
   const { banners, pushBanner, dismissBanner, clearTags } = useBanners();
 
   const [destination, setDestination] = useState<Place | null>(null);
@@ -60,6 +59,9 @@ export default function App() {
   const [mapRenderer, setMapRenderer] = useState<MapRenderer>('gl');
   const [mapKey, setMapKey] = useState(0); // bump to re-mount the map (retry)
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  // while navigating: no smoothing — the raw max-precision fix is shown
+  // (snapped onto the route line), so position is exact
+  const geo = useGeolocation(!navigating);
   // per-device settings; lite mode auto-on for weak hardware unless the user chose explicitly
   const [settings, setSettingsState] = useState<Settings>(() => {
     const s = getSettings();
@@ -112,30 +114,30 @@ export default function App() {
     if (online) {
       clearTags('net');
     } else {
-      pushBanner('error', 'YOU ARE OFFLINE — CACHED TILES ONLY, ROUTING/SEARCH UNAVAILABLE', { tag: 'net', sticky: true });
+      pushBanner('error', 'You are offline — cached tiles only, routing and search unavailable', { tag: 'net', sticky: true });
     }
   }, [online, pushBanner, clearTags]);
 
   // ── GPS status banners ─────────────────────────────────────────────────────
   useEffect(() => {
     if (geo.status === 'denied') {
-      pushBanner('error', 'GPS PERMISSION DENIED — ALLOW LOCATION FOR THIS SITE IN THE BROWSER, THEN RETRY', {
+      pushBanner('error', 'Location permission denied — allow location for this site in the browser, then retry', {
         tag: 'gps',
         sticky: true,
-        action: { label: 'RETRY', onClick: geo.retry },
+        action: { label: 'Retry', onClick: geo.retry },
       });
     } else if (geo.status === 'error') {
-      pushBanner('error', 'GPS SIGNAL LOST — RETRYING AUTOMATICALLY', {
+      pushBanner('error', 'GPS signal lost — retrying automatically', {
         tag: 'gps',
         sticky: true,
-        action: { label: 'RETRY', onClick: geo.retry },
+        action: { label: 'Retry', onClick: geo.retry },
       });
     } else if (geo.status === 'unsupported') {
-      pushBanner('error', 'GEOLOCATION NOT SUPPORTED BY THIS BROWSER — ROUTES START FROM MAP CENTER', { tag: 'gps', sticky: true });
+      pushBanner('error', 'Geolocation is not supported by this browser — routes start from the map center', { tag: 'gps', sticky: true });
     } else if (geo.status === 'locating') {
       // no fix yet — after a while, tell the user what might be wrong
       const t = setTimeout(() => {
-        pushBanner('info', 'GPS STILL SEARCHING… — TURN ON LOCATION (HIGH ACCURACY) AND TRY OUTDOORS', { tag: 'gps-slow' });
+        pushBanner('info', 'GPS still searching… turn on location (high accuracy) and try outdoors', { tag: 'gps-slow' });
       }, 10000);
       return () => clearTimeout(t);
     } else {
@@ -171,7 +173,7 @@ export default function App() {
             tag: 'route',
             sticky: true, // stays until fixed — it carries a RETRY action
             action: {
-              label: 'RETRY',
+              label: 'Retry',
               onClick: () => {
                 if (destRef.current) void fetchRoute(destRef.current, modeRef.current);
               },
@@ -212,14 +214,14 @@ export default function App() {
       setResults(r);
       setSearchStatus('idle');
       if (r.length > 0) setSnap('full');
-      else pushBanner('info', 'NO RESULTS — TRY ANOTHER NAME OR A CITY');
+      else pushBanner('info', 'No results — try another name or a city');
     } catch {
       setResults([]);
       setSearchStatus('error');
-      pushBanner('error', 'SEARCH FAILED — NOMINATIM UNREACHABLE (OR OFFLINE)', {
+      pushBanner('error', 'Search failed — Nominatim unreachable (or offline)', {
         tag: 'search',
         sticky: true,
-        action: { label: 'RETRY', onClick: () => void onSearchRef.current() },
+        action: { label: 'Retry', onClick: () => void onSearchRef.current() },
       });
     }
   }, [query, searchStatus, pushBanner]);
@@ -289,7 +291,7 @@ export default function App() {
     let removeListener = () => {};
     void acquireWakeLock().then((ok) => {
       if (!ok && !wakeLockSupported()) {
-        pushBanner('info', 'SCREEN WAKE LOCK NOT SUPPORTED HERE — THE SCREEN MAY SLEEP WHILE NAVIGATING');
+        pushBanner('info', 'Screen wake lock is not supported here — the screen may sleep while navigating');
       }
       removeListener = reacquireOnVisible();
     });
@@ -306,8 +308,10 @@ export default function App() {
     const p: [number, number] = [geo.pos.coords.longitude, geo.pos.coords.latitude];
     const near = nearestOnPolyline(route.coords, p);
 
-    // snap the dot onto the route when we're close to it (smoother tracking)
-    if (near.distM < 40) {
+    // snap the dot onto the route when we're close to it (smoother tracking);
+    // tighter while navigating for max precision
+    const snapM = navigating ? 25 : 40;
+    if (near.distM < snapM) {
       setDisplayPos({ ...geo.pos, coords: { ...geo.pos.coords, longitude: near.point[0], latitude: near.point[1] } });
     } else {
       setDisplayPos(null);
@@ -344,7 +348,7 @@ export default function App() {
       offRouteCount.current += 1;
       if (offRouteCount.current >= CONFIG.reroute.consecutiveFixes && destRef.current) {
         offRouteCount.current = 0;
-        pushBanner('info', 'OFF ROUTE — REROUTING…');
+        pushBanner('info', 'Off route — rerouting…');
         void fetchRoute(destRef.current, modeRef.current);
       }
     } else {
@@ -366,7 +370,7 @@ export default function App() {
       // no fix yet: nothing to center on — arm follow mode so the map snaps to
       // the user as soon as the first fix arrives
       setFollow(true);
-      pushBanner('info', 'NO GPS FIX YET — FOLLOW ARMED, MAP CENTERS WHEN GPS LOCKS', { tag: 'recenter' });
+      pushBanner('info', 'No GPS fix yet — follow armed, map centers when GPS locks', { tag: 'recenter' });
     }
   }, [pushBanner]);
 
@@ -381,11 +385,11 @@ export default function App() {
           updateSettings({ ...settings, perf: true });
           setMapStatus('loading');
           setMapKey((k) => k + 1);
-          pushBanner('info', `GL MAP UNAVAILABLE (${msg ?? 'unknown'}) — SWITCHED TO LITE RASTER MAP`, {
+          pushBanner('info', `Map rendering unavailable (${msg ?? 'unknown'}) — switched to the lite raster map`, {
             tag: 'map',
             sticky: true,
             action: {
-              label: 'TRY GL AGAIN',
+              label: 'Retry',
               onClick: () => {
                 autoRasterTried.current = false;
                 updateSettings({ ...settings, perf: false });
@@ -396,11 +400,11 @@ export default function App() {
           });
           return;
         }
-        pushBanner('error', `MAP FAILED TO LOAD (${msg ?? 'unknown'}) — CHECK CONNECTION / WEBGL`, {
+        pushBanner('error', `Map failed to load (${msg ?? 'unknown'}) — check connection or WebGL`, {
           tag: 'map',
           sticky: true,
           action: {
-            label: 'RETRY',
+            label: 'Retry',
             onClick: () => {
               setMapStatus('loading');
               setMapKey((k) => k + 1);
@@ -445,15 +449,13 @@ export default function App() {
         />
       ) : (
         <div className="hint-panel">
-          <p className="mono dim">
-            TAP THE MAP TO DROP A PIN
-            <br />
-            OR SEARCH ABOVE + ENTER
+          <p className="dim">
+            Tap the map to drop a pin, or search for a place above.
           </p>
           {favorites.length > 0 && (
             <div className="fav-chips">
               {favorites.map((f) => (
-                <button key={f.id} className="chip mono" onClick={() => pickPlace(f)}>
+                <button key={f.id} className="chip" onClick={() => pickPlace(f)}>
                   {shortName(f.name)}
                 </button>
               ))}
@@ -466,8 +468,8 @@ export default function App() {
 
   const bodyContent = (
     <>
-      {searchStatus === 'loading' && <div className="body-note mono dim">SEARCHING…</div>}
-      {searchStatus === 'error' && <div className="body-note mono err">SEARCH FAILED — CHECK CONNECTION</div>}
+      {searchStatus === 'loading' && <div className="body-note dim">Searching…</div>}
+      {searchStatus === 'error' && <div className="body-note err">Search failed — check your connection.</div>}
       {results.length > 0 && (
         <ul className="results">
           {results.map((r) => (
@@ -482,7 +484,7 @@ export default function App() {
       )}
       {results.length === 0 && route && routeStatus === 'ok' && (
         <>
-          <div className="body-label mono dim">TURN-BY-TURN // {route.steps.length} STEPS</div>
+          <div className="body-label">Turn-by-turn · {route.steps.length} steps</div>
           <StepsList steps={route.steps} current={navigating && nav ? nav.stepIndex : null} />
         </>
       )}
@@ -490,7 +492,7 @@ export default function App() {
         <>
           {favorites.length > 0 && (
             <>
-              <div className="body-label mono dim">SAVED PLACES // {favorites.length}</div>
+              <div className="body-label">Saved places · {favorites.length}</div>
               <ul className="fav-list">
                 {favorites.map((f) => (
                   <li key={f.id}>
@@ -498,7 +500,7 @@ export default function App() {
                       <span className="r-name">{f.name}</span>
                       <span className="r-kind mono">{formatCoord(f.lat, f.lon)}</span>
                     </button>
-                    <button className="icon-btn mono" onClick={() => setFavorites(removeFavorite(f.id))} aria-label={`remove ${shortName(f.name)}`}>
+                    <button className="icon-btn" onClick={() => setFavorites(removeFavorite(f.id))} aria-label={`Remove ${shortName(f.name)}`}>
                       ×
                     </button>
                   </li>
@@ -506,8 +508,8 @@ export default function App() {
               </ul>
             </>
           )}
-          <div className="body-label mono dim footer-note">
-            MAP DATA © OPENSTREETMAP CONTRIBUTORS · TILES OPENFREEMAP (FALLBACK: OSM RASTER) · ROUTING VALHALLA/OSRM — ALL FREE PUBLIC SERVICES
+          <div className="body-label dim footer-note">
+            Map data © OpenStreetMap contributors · tiles OpenFreeMap (fallback: OSM raster) · routing Valhalla/OSRM — all free public services.
           </div>
         </>
       )}
@@ -521,8 +523,8 @@ export default function App() {
           <Suspense
             fallback={
               <div className="map-container map-loading">
-                <span className="mono">
-                  LOADING MAP<span className="dots">…</span>
+                <span>
+                  Loading map<span className="dots">…</span>
                 </span>
               </div>
             }
@@ -562,19 +564,19 @@ export default function App() {
 
         <div className="banners">
           {banners.map((b) => (
-            <div key={b.id} className={`banner mono ${b.kind}`} role={b.kind === 'error' ? 'alert' : 'status'}>
+            <div key={b.id} className={`banner ${b.kind}`} role={b.kind === 'error' ? 'alert' : 'status'}>
               <span className="b-msg">{b.msg}</span>
               {b.action && (
-                <button className="mini-btn mono" onClick={b.action.onClick}>
+                <button className="mini-btn" onClick={b.action.onClick}>
                   {b.action.label}
                 </button>
               )}
               {b.action2 && (
-                <button className="mini-btn mono" onClick={b.action2.onClick}>
+                <button className="mini-btn" onClick={b.action2.onClick}>
                   {b.action2.label}
                 </button>
               )}
-              <button className="icon-btn mono b-x" onClick={() => dismissBanner(b.id)} aria-label="dismiss">
+              <button className="icon-btn b-x" onClick={() => dismissBanner(b.id)} aria-label="dismiss">
                 ×
               </button>
             </div>
@@ -594,8 +596,8 @@ export default function App() {
           />
         )}
 
-        <div className={`map-status mono${mapStatus === 'error' ? ' err' : ''}`}>
-          MAP ▸ {mapStatus === 'ready' ? (mapRenderer === 'raster' ? 'RASTER' : 'GL') : mapStatus === 'loading' ? 'LOADING…' : 'ERROR — SEE BANNER'}
+        <div className={`map-status${mapStatus === 'error' ? ' err' : ''}`}>
+          Map · <span className="mono">{mapStatus === 'ready' ? (mapRenderer === 'raster' ? 'raster' : 'vector') : mapStatus === 'loading' ? 'loading…' : 'error — see banner'}</span>
         </div>
 
         <MapButtons
@@ -607,8 +609,8 @@ export default function App() {
         />
 
         {snap === 'hidden' && (
-          <button className="fab mono" onClick={() => setSnap('peek')}>
-            + SEARCH
+          <button className="fab" onClick={() => setSnap('peek')}>
+            Search
           </button>
         )}
       </div>

@@ -17,7 +17,11 @@ interface RoutePanelProps {
   onToggleFav: () => void;
 }
 
-const MODES: TravelMode[] = ['car', 'walk', 'bike'];
+const MODES: Array<{ id: TravelMode; label: string }> = [
+  { id: 'car', label: 'Car' },
+  { id: 'walk', label: 'Walk' },
+  { id: 'bike', label: 'Bike' },
+];
 
 export function RoutePanel(props: RoutePanelProps) {
   const { destination, route, routeStatus, mode, onMode, navigating, onStart, onStop, onClear, onRetry, isFav, onToggleFav } = props;
@@ -26,38 +30,38 @@ export function RoutePanel(props: RoutePanelProps) {
       <div className="route-dest">
         <span className="dest-pin" aria-hidden>◆</span>
         <span className="dest-name" title={destination.name}>{destination.name}</span>
-        <button className={`icon-btn mono${isFav ? ' fav' : ''}`} onClick={onToggleFav} title={isFav ? 'remove from saved' : 'save place'} aria-label="toggle favorite">
+        <button className={`icon-btn${isFav ? ' fav' : ''}`} onClick={onToggleFav} title={isFav ? 'Remove from saved' : 'Save place'} aria-label="Toggle favorite">
           {isFav ? '★' : '☆'}
         </button>
-        <button className="icon-btn mono" onClick={onClear} title="clear destination" aria-label="clear destination">×</button>
+        <button className="icon-btn" onClick={onClear} title="Clear destination" aria-label="Clear destination">×</button>
       </div>
 
-      {routeStatus === 'loading' && <div className="mono dim route-note">CALCULATING ROUTE<span className="dots">…</span></div>}
+      {routeStatus === 'loading' && <div className="dim route-note">Calculating route<span className="dots">…</span></div>}
       {routeStatus === 'error' && (
-        <div className="mono route-note err">
-          ROUTE FAILED — SERVER DOWN OR NO ROUTE
-          <button className="mini-btn mono" onClick={onRetry}>RETRY</button>
+        <div className="route-note err">
+          Route failed — server down or no route found
+          <button className="mini-btn" onClick={onRetry}>Retry</button>
         </div>
       )}
 
       {route && routeStatus === 'ok' && (
         <>
-          <div className="route-stats mono">
-            <span>DIST // {formatDistance(route.distanceM)}</span>
-            <span>TIME // {formatDuration(route.durationS)}</span>
-            <span>ETA // {formatEta(route.durationS)}</span>
+          <div className="route-stats">
+            <span>Distance <b>{formatDistance(route.distanceM)}</b></span>
+            <span>Time <b>{formatDuration(route.durationS)}</b></span>
+            <span>Arrive <b>{formatEta(route.durationS)}</b></span>
           </div>
-          <div className="mode-switch mono" role="group" aria-label="travel mode">
+          <div className="mode-switch" role="group" aria-label="Travel mode">
             {MODES.map((m) => (
-              <button key={m} className={mode === m ? 'active' : ''} onClick={() => onMode(m)}>
-                {m.toUpperCase()}
+              <button key={m.id} className={mode === m.id ? 'active' : ''} onClick={() => onMode(m.id)} aria-pressed={mode === m.id}>
+                {m.label}
               </button>
             ))}
           </div>
           {navigating ? (
-            <button className="btn primary stop" onClick={onStop}>■ STOP NAVIGATION</button>
+            <button className="btn primary stop" onClick={onStop}>Stop navigation</button>
           ) : (
-            <button className="btn primary" onClick={onStart}>▶ START</button>
+            <button className="btn primary" onClick={onStart}>Start navigation</button>
           )}
         </>
       )}
