@@ -28,14 +28,24 @@ export type MapStyle = 'auto' | 'dark' | 'light' | 'liberty' | 'bright';
 
 export const CONFIG = {
   map: {
-    /** OpenFreeMap styles — dark for dark mode, positron for light mode. */
+    /** OpenFreeMap styles — kept as an escape hatch (sidebar: "classic") */
     darkStyleUrl: 'https://tiles.openfreemap.org/styles/dark',
     lightStyleUrl: 'https://tiles.openfreemap.org/styles/positron',
-    /** extra quality styles the user can pin in the sidebar */
     extraStyleUrls: {
       liberty: 'https://tiles.openfreemap.org/styles/liberty',
       bright: 'https://tiles.openfreemap.org/styles/bright',
     } as Record<Exclude<MapStyle, 'auto' | 'dark' | 'light'>, string>,
+
+    /** vector tile source for the built-in basemap (OpenMapTiles schema) */
+    vectorSourceUrl: 'https://tiles.openfreemap.org/planet',
+    /** label glyphs (PBF font stacks) */
+    glyphsUrl: 'https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf',
+    /** font stacks published by the tile host */
+    fonts: {
+      regular: 'Noto Sans Regular',
+      bold: 'Noto Sans Bold',
+      italic: 'Noto Sans Italic',
+    },
     /** OSM raster tiles — only used by the no-WebGL2 Leaflet fallback map */
     osmRasterUrl: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
     /** Frankfurt am Main — change to your home town. [lon, lat] */
@@ -47,6 +57,10 @@ export const CONFIG = {
     navPitch: 60,
     /** don't auto-follow the GPS dot closer than this */
     minFollowZoom: 15,
+    /** zoom used when a search result or pin is picked */
+    pickZoom: 15.5,
+    /** while navigating, pull the arrow onto the route within this distance */
+    snapToRouteM: 25,
   },
 
   nominatim: {

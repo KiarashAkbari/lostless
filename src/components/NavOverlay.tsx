@@ -1,3 +1,4 @@
+import { useLayoutEffect, useRef } from 'react';
 import type { TravelMode } from '../config';
 import type { RouteStep } from '../types';
 import { maneuverGlyph, maneuverLabel } from '../lib/maneuvers';
@@ -24,17 +25,34 @@ const cap = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
  * only monospace text here.
  */
 export function NavOverlay({ step, distToNextM, remainingM, remainingS, speedKmh, progress, mode, onStop }: NavOverlayProps) {
+  // publish our height so banners can sit *below* this card instead of on it
+  const cardRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const el = cardRef.current;
+    if (!el) return;
+    const root = document.documentElement;
+    const sync = () => root.style.setProperty('--nav-h', `${el.offsetHeight}px`);
+    sync();
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(sync) : null;
+    ro?.observe(el);
+    return () => {
+      ro?.disconnect();
+      root.style.setProperty('--nav-h', '0px');
+    };
+  }, []);
+
   // a route with zero steps still needs the overlay (stop button, ETA) — show a fallback card
-  const glyph = step ? maneuverGlyph(step) : '◦';
-  const label = step ? cap(maneuverLabel(step)) : 'On your way';
+  const arrived = Number.isFinite(remainingM) && remainingM <= 25;
+  const glyph = arrived ? '◉' : step ? maneuverGlyph(step) : '◦';
+  const label = arrived ? "You've arrived" : step ? cap(maneuverLabel(step)) : 'On your way';
   const street = step ? step.street || step.instruction : '';
   return (
-    <div className="nav-overlay">
+    <div className="nav-overlay" ref={cardRef}>
       <div className="nav-main">
         <span className="nav-glyph" aria-hidden>{glyph}</span>
         <div className="nav-text">
           <div className="nav-in">
-            <span className="mono nav-dist">{formatDistance(distToNextM)}</span> {label}
+            {arrived ? label : (<><span className="mono nav-dist">{formatDistance(distToNextM)}</span> {label}</>)}
           </div>
           <div className="nav-street">{street}</div>
         </div>

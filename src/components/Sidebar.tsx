@@ -26,10 +26,9 @@ const TABS: Array<{ id: Tab; label: string }> = [
 
 const STYLE_CHOICES: Array<{ id: MapStyle; label: string }> = [
   { id: 'auto', label: 'Auto' },
-  { id: 'dark', label: 'Dark' },
   { id: 'light', label: 'Light' },
-  { id: 'liberty', label: 'Liberty' },
-  { id: 'bright', label: 'Bright' },
+  { id: 'dark', label: 'Dark' },
+  { id: 'liberty', label: 'Classic' },
 ];
 
 function Toggle({ on, onClick, label }: { on: boolean; onClick: () => void; label: string }) {

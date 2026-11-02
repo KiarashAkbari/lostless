@@ -182,6 +182,13 @@ plain CSS (no framework). One typeface, Barlow (two latin subsets, ~44 kB), with
 system mono reserved for numerals and coordinates. Interface is frosted glass on matte
 black; panels float over a full-bleed map. No backend, no database, no keys.
 
+The basemap is **hand-written** (`src/lib/mapStyle.ts`) rather than a downloaded style:
+about 35 layers instead of 110, no sprite sheet, roads drawn as a colour-coded ladder
+(warm motorways, white primaries, soft local streets with casings), buildings and points
+of interest only at street zoom, and two low-saturation palettes (`paper` for light,
+`slate` for dark). The style object is validated against the official MapLibre spec in
+the test suite, so an invalid expression fails CI instead of blanking a layer.
+
 ## Project layout
 
 ```
