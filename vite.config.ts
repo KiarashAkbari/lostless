@@ -29,6 +29,20 @@ const serviceProxy = {
 
 export default defineConfig({
   base: './',
+  build: {
+    // maplibre is deliberately its own vendor chunk (~1 MB raw / ~285 kB gzip)
+    chunkSizeWarningLimit: 1100,
+    // keep the vendored map engine in its own long-lived chunk: the app shell
+    // (and its CSS) parses first, maplibre streams in behind the placeholder
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          maplibre: ['maplibre-gl'],
+          react: ['react', 'react-dom'],
+        },
+      },
+    },
+  },
   // the Arena live-preview proxies via a dynamic host (*.e2b.app) — allow it
   server: { allowedHosts: true, proxy: serviceProxy },
   preview: { allowedHosts: true, proxy: serviceProxy },

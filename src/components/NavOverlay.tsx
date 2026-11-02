@@ -15,16 +15,18 @@ interface NavOverlayProps {
   onStop: () => void;
 }
 
-const MODE_LABEL: Record<TravelMode, string> = { car: 'DRIVE', walk: 'WALK', bike: 'BIKE' };
+const MODE_LABEL: Record<TravelMode, string> = { car: 'Drive', walk: 'Walk', bike: 'Bike' };
+const cap = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
 
 /**
- * Navigation mode readout (Neshan/Balad-style): a big next-turn card on top,
- * route progress bar, and an ETA / speed strip with a STOP button.
+ * Navigation mode readout (sat-nav style): a big next-turn card on top, route
+ * progress bar, and an ETA / speed strip with a stop button. Numbers are the
+ * only monospace text here.
  */
 export function NavOverlay({ step, distToNextM, remainingM, remainingS, speedKmh, progress, mode, onStop }: NavOverlayProps) {
-  // a route with zero steps still needs the overlay (STOP button, ETA) — show a fallback card
+  // a route with zero steps still needs the overlay (stop button, ETA) — show a fallback card
   const glyph = step ? maneuverGlyph(step) : '◦';
-  const label = step ? maneuverLabel(step).toUpperCase() : 'NAVIGATING';
+  const label = step ? cap(maneuverLabel(step)) : 'On the way';
   const street = step ? step.street || step.instruction : '';
   return (
     <div className="nav-overlay">
@@ -34,20 +36,20 @@ export function NavOverlay({ step, distToNextM, remainingM, remainingS, speedKmh
           <div className="nav-in">
             <span className="mono nav-dist">{formatDistance(distToNextM)}</span> {label}
           </div>
-          <div className="nav-street mono">{street}</div>
+          <div className="nav-street">{street}</div>
         </div>
-        <span className="chip mono nav-mode">{MODE_LABEL[mode]}</span>
+        <span className="chip nav-mode">{MODE_LABEL[mode]}</span>
       </div>
       <div className="nav-progress" aria-hidden>
         <span style={{ width: `${Math.round(Math.min(1, Math.max(0, progress)) * 100)}%` }} />
       </div>
-      <div className="nav-sub mono">
-        <span>ARRIVE {formatEta(remainingS)}</span>
-        <span>{formatDuration(remainingS)}</span>
-        <span>{formatDistance(remainingM)} LEFT</span>
-        <span>{speedKmh !== null && Number.isFinite(speedKmh) ? `${Math.round(Math.max(0, speedKmh))} KM/H` : '—'}</span>
+      <div className="nav-sub">
+        <span>Arrive <span className="mono">{formatEta(remainingS)}</span></span>
+        <span className="mono">{formatDuration(remainingS)}</span>
+        <span><span className="mono">{formatDistance(remainingM)}</span> left</span>
+        <span className="mono">{speedKmh !== null && Number.isFinite(speedKmh) ? `${Math.round(Math.max(0, speedKmh))} km/h` : '—'}</span>
       </div>
-      <button className="btn stop nav-stop mono" onClick={onStop}>■ STOP</button>
+      <button className="btn stop nav-stop" onClick={onStop}>Stop</button>
     </div>
   );
 }

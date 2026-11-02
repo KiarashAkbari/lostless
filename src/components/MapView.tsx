@@ -5,7 +5,7 @@ import type { Feature, LineString } from 'geojson';
 import { CONFIG, previewProxied, svcUrl, rewriteStyleUrls, styleUrlFor, type MapStyle } from '../config';
 import type { Place, RouteResult } from '../types';
 import type { Theme } from '../hooks/useTheme';
-import { circlePolygon } from '../lib/geo';
+import { bearingDeg, circlePolygon, haversineM } from '../lib/geo';
 
 // Load the MapLibre worker from a same-origin file instead of the default
 // inline blob worker, so the map also works where a CSP blocks blob: workers
@@ -55,7 +55,7 @@ const RasterMapView = lazy(() => import('./RasterMapView').then((m) => ({ defaul
 function MapLoading() {
   return (
     <div className="map-container map-loading">
-      <span className="mono">LOADING MAP<span className="dots">…</span></span>
+      <span>Loading map<span className="dots">…</span></span>
     </div>
   );
 }
@@ -112,6 +112,7 @@ function GlMapView(props: MapViewProps) {
   const destMarkerRef = useRef<maplibregl.Marker | null>(null);
   const styleLoadedRef = useRef(false);
   const lastFollowRef = useRef<[number, number] | null>(null);
+  const lastDotRef = useRef<[number, number] | null>(null);
   const errorCountRef = useRef(0);
   const origTextFieldRef = useRef(new Map<string, unknown>());
   const applyLabelsRef = useRef<() => void>(() => {});
@@ -202,6 +203,12 @@ function GlMapView(props: MapViewProps) {
           fadeDuration: perfRef.current ? 0 : 300,
           refreshExpiredTiles: false,
           dragRotate: false,
+          // rendering cost: no MSAA (big win on mobile GPUs), no drawing buffer
+          // preservation, and a bounded tile cache so memory stays flat
+          canvasContextAttributes: { antialias: false, preserveDrawingBuffer: false, powerPreference: 'high-performance' },
+          maxTileCacheSize: perfRef.current ? 40 : 120,
+          // the container has its own ResizeObserver below — skip MapLibre's
+          trackResize: false,
         });
       } catch (err) {
         onStatusRef.current?.('error', err instanceof Error ? err.message : 'WebGL init failed');
@@ -311,11 +318,11 @@ function GlMapView(props: MapViewProps) {
         down = null;
       });
 
-      // GPS dot marker
+      // GPS arrow marker — rotates with the heading (rotationAlignment 'map')
       const meEl = document.createElement('div');
       meEl.className = 'me-marker';
-      meEl.innerHTML = '<span class="me-ring"></span><span class="me-dot"></span>';
-      meMarkerRef.current = new maplibregl.Marker({ element: meEl, anchor: 'center' });
+      meEl.innerHTML = '<span class="me-ring"></span><span class="me-arrow"></span>';
+      meMarkerRef.current = new maplibregl.Marker({ element: meEl, anchor: 'center', rotationAlignment: 'map' });
 
       // destination pin
       const destEl = document.createElement('div');
@@ -389,6 +396,14 @@ function GlMapView(props: MapViewProps) {
     const ll: [number, number] = [p.coords.longitude, p.coords.latitude];
     if (!Number.isFinite(ll[0]) || !Number.isFinite(ll[1])) return; // never feed NaN to maplibre
     marker.setLngLat(ll).addTo(map);
+    // heading first; otherwise the direction we actually moved (GPS heading is
+    // null while slow — the arrow would point north and look broken)
+    const hd = p.coords.heading;
+    const prev = lastDotRef.current;
+    const moved = prev ? bearingDeg(prev, ll) : null;
+    lastDotRef.current = ll;
+    if (hd !== null && Number.isFinite(hd)) marker.setRotation(hd);
+    else if (moved !== null && prev && haversineM(prev, ll) > 3) marker.setRotation(moved);
     if (styleLoadedRef.current && map.isStyleLoaded()) {
       const src = map.getSource('me-accuracy') as maplibregl.GeoJSONSource | undefined;
       const acc = Number.isFinite(p.coords.accuracy) && p.coords.accuracy > 0 ? p.coords.accuracy : 25;
@@ -431,8 +446,22 @@ function GlMapView(props: MapViewProps) {
     }
     lastFollowRef.current = [longitude, latitude];
     // heading can be null or NaN/Infinity on some WebViews — only trust finite values
-    const bearing = heading !== null && Number.isFinite(heading) ? heading : map.getBearing();
-    const target = { center: [longitude, latitude] as [number, number], zoom: Math.max(map.getZoom(), CONFIG.map.navigationZoom), bearing };
+    const movedBearing = last ? bearingDeg(last, [longitude, latitude]) : null;
+    const bearing =
+      heading !== null && Number.isFinite(heading)
+        ? heading
+        : movedBearing !== null && haversineM(last!, [longitude, latitude]) > 3
+          ? movedBearing
+          : map.getBearing();
+    // navigation mode: close-up + tilted 3D perspective, like a sat-nav.
+    // the bottom padding pushes the car below the horizon instead of dead-center
+    const target = {
+      center: [longitude, latitude] as [number, number],
+      zoom: Math.max(map.getZoom(), CONFIG.map.navigationZoom),
+      bearing,
+      pitch: CONFIG.map.navPitch,
+      padding: { top: 0, right: 0, bottom: Math.round((map.getContainer?.().clientHeight || 0) * 0.22), left: 0 },
+    };
     if (instantRef.current) {
       map.jumpTo(target);
     } else {
@@ -440,6 +469,15 @@ function GlMapView(props: MapViewProps) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.pos, props.displayPos, props.navigating, props.follow]);
+
+  // leaving navigation mode → flatten the map back to top-down
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || props.navigating) return;
+    if (instantRef.current) map.jumpTo({ pitch: 0, bearing: 0 });
+    else map.easeTo({ pitch: 0, bearing: 0, duration: 500 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.navigating]);
 
   return <div className="map-container" ref={containerRef} data-testid="map" />;
 }
@@ -456,5 +494,5 @@ const lineFeature = (coords: [number, number][]): Feature<LineString> => ({
 });
 
 function getCssVar(name: string): string {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || '#c8ff2e';
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || '#4da3ff';
 }

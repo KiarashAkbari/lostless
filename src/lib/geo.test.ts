@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { haversineM, nearestOnPolyline, decodePolyline, formatDistance, formatDuration, formatEta } from './geo';
+import { bearingDeg, haversineM, nearestOnPolyline, decodePolyline, formatDistance, formatDuration, formatEta } from './geo';
 
 describe('haversineM', () => {
   it('Frankfurt → Paris is ≈ 478 km', () => {
@@ -40,6 +40,19 @@ describe('decodePolyline', () => {
     expect(coords[0][1]).toBeCloseTo(38.5, 3);
     expect(coords[2][0]).toBeCloseTo(-126.453, 3);
     expect(coords[2][1]).toBeCloseTo(43.252, 3);
+  });
+});
+
+describe('bearingDeg', () => {
+  it('points north, east, south, west', () => {
+    expect(bearingDeg([8.68, 50.11], [8.68, 50.12])).toBeCloseTo(0, 1);
+    expect(bearingDeg([8.68, 50.11], [8.69, 50.11])).toBeCloseTo(90, 0);
+    expect(bearingDeg([8.68, 50.11], [8.68, 50.10])).toBeCloseTo(180, 1);
+    expect(bearingDeg([8.68, 50.11], [8.67, 50.11])).toBeCloseTo(270, 0);
+  });
+  it('is 0 for identical or broken input (never NaN)', () => {
+    expect(bearingDeg([8.68, 50.11], [8.68, 50.11])).toBe(0);
+    expect(bearingDeg([NaN, 50.11], [8.68, 50.11])).toBe(0);
   });
 });
 

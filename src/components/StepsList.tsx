@@ -8,6 +8,8 @@ interface StepsListProps {
   current: number | null;
 }
 
+const cap = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
+
 export function StepsList({ steps, current }: StepsListProps) {
   const currentRef = useRef<HTMLLIElement | null>(null);
 
@@ -19,11 +21,12 @@ export function StepsList({ steps, current }: StepsListProps) {
     <ol className="steps">
       {steps.map((s, i) => (
         <li key={i} ref={i === current ? currentRef : undefined} className={i === current ? 'current' : ''}>
-          <span className="s-glyph mono" aria-hidden>{maneuverGlyph(s)}</span>
+          <span className="s-glyph" aria-hidden>{maneuverGlyph(s)}</span>
           <span className="s-body">
-            <span className="s-instr">{s.instruction || maneuverLabel(s)}</span>
-            <span className="s-meta mono">
-              {[s.street, formatDistance(s.distanceM)].filter(Boolean).join(' · ')}
+            <span className="s-instr">{s.instruction || cap(maneuverLabel(s))}</span>
+            <span className="s-meta">
+              {s.street ? `${s.street} · ` : ''}
+              <span className="mono">{formatDistance(s.distanceM)}</span>
             </span>
           </span>
         </li>

@@ -177,9 +177,10 @@ OSM planet extracts for all of the above: [download.geofabrik.de](https://downlo
 
 ## Stack
 
-Vite + React + TypeScript, MapLibre GL JS, self-hosted fonts (Space Grotesk + JetBrains
-Mono via Fontsource), `vite-plugin-pwa` for the service worker, plain CSS (no framework).
-No backend, no database, no keys.
+Vite + React + TypeScript, MapLibre GL JS, `vite-plugin-pwa` for the service worker,
+plain CSS (no framework). Zero webfont downloads — the UI uses the system Helvetica /
+system-ui stack, with ui-monospace reserved for numerals and coordinates. No backend,
+no database, no keys.
 
 ## Project layout
 

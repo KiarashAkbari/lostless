@@ -29,6 +29,9 @@ export function RasterMapView(props: MapViewProps) {
 
   const reduced = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches || (props.perf ?? false);
   const toLatLng = (c: [number, number]): [number, number] => [c[1], c[0]];
+  // read the theme accent so the raster map matches the GL map (styles.css)
+  const accent = () =>
+    getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#4da3ff';
 
   // init
   useEffect(() => {
@@ -88,11 +91,12 @@ export function RasterMapView(props: MapViewProps) {
     const acc = Number.isFinite(p.coords.accuracy) && p.coords.accuracy > 0 ? Math.min(p.coords.accuracy, 100000) : 30;
     if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
     if (!meRef.current) {
+      const a = accent();
       meRef.current = L.circleMarker([latitude, longitude], {
-        radius: 7, color: '#0b0d0e', weight: 2, fillColor: '#c8ff2e', fillOpacity: 1,
+        radius: 7, color: '#0b0e12', weight: 2, fillColor: a, fillOpacity: 1,
       }).addTo(map);
       accRef.current = L.circle([latitude, longitude], {
-        radius: acc, color: '#c8ff2e', weight: 1, fillColor: '#c8ff2e', fillOpacity: 0.08,
+        radius: acc, color: a, weight: 1, fillColor: a, fillOpacity: 0.08,
       }).addTo(map);
     } else {
       meRef.current.setLatLng([latitude, longitude]);
@@ -135,9 +139,10 @@ export function RasterMapView(props: MapViewProps) {
     }
     const { route, remainingCoords, navigating } = dataRef.current;
     if (route?.coords?.length) {
+      const a = accent();
       const pts = route.coords.map(toLatLng);
       routeRef.current = L.polyline(pts, {
-        color: '#c8ff2e', weight: 6, opacity: navigating ? 0.4 : 1, lineJoin: 'round',
+        color: a, weight: 6, opacity: navigating ? 0.4 : 1, lineJoin: 'round',
       }).addTo(map);
       // fit the view to each NEW route (second destination, reroute, mode switch)
       if (!navigating && fittedRouteRef.current !== route) {
@@ -146,7 +151,7 @@ export function RasterMapView(props: MapViewProps) {
       }
       if (navigating && remainingCoords?.length) {
         restRef.current = L.polyline(remainingCoords.map(toLatLng), {
-          color: '#c8ff2e', weight: 6, opacity: 1, lineJoin: 'round',
+          color: a, weight: 6, opacity: 1, lineJoin: 'round',
         }).addTo(map);
       }
     } else {

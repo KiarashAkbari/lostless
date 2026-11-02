@@ -14,6 +14,18 @@ export function haversineM(a: [number, number], b: [number, number]): number {
   return 2 * R * Math.asin(Math.sqrt(h));
 }
 
+/** compass bearing a -> b in degrees (0 = north, clockwise). 0 for identical points. */
+export function bearingDeg(a: [number, number], b: [number, number]): number {
+  if (!Number.isFinite(a[0]) || !Number.isFinite(a[1]) || !Number.isFinite(b[0]) || !Number.isFinite(b[1])) return 0;
+  const lat1 = toRad(a[1]);
+  const lat2 = toRad(b[1]);
+  const dLon = toRad(b[0] - a[0]);
+  const y = Math.sin(dLon) * Math.cos(lat2);
+  const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
+  const deg = (Math.atan2(y, x) * 180) / Math.PI;
+  return (deg + 360) % 360;
+}
+
 /** finite number or fallback — kills NaN/Infinity from flaky sensors & APIs */
 export const finite = (v: number | null | undefined, fallback = 0): number =>
   typeof v === 'number' && Number.isFinite(v) ? v : fallback;
