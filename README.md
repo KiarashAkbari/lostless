@@ -15,6 +15,30 @@ On older phones a **LITE MODE** auto-enables on weak hardware (≤4 cores / ≤4
 lightweight raster map + no animations; if the WebGL map ever fails, the app automatically
 falls back to the raster map instead of showing a blank map.
 
+Navigation follows the methods the big sat-navs use, all in plain TypeScript with tests:
+
+- **Voice prompts on a distance ladder.** Each maneuver is announced up to three times,
+  timed by *seconds to the turn* rather than fixed metres (OsmAnd's approach), so a city
+  block and a motorway exit both sound right. The router's own phrasing is used when it
+  has it: Valhalla ships a warning sentence, a maneuver sentence and a "continue" sentence
+  per step, plus a multi-cue sentence when two maneuvers come back to back.
+- **Lanes, exit numbers, posted limits.** Valhalla's `lanes`, `sign.exit_number_elements`
+  and `speed_limit` drive a lane diagram, an exit chip and a round limit badge that turns
+  red when you are actually over the limit (with a sat-nav-style allowance).
+- **Camera that drives like a sat-nav.** Zoom is a function of speed with hysteresis
+  (closer in town, wider above 100 km/h) and pulls in for a junction; the map tilts to
+  60°, rotates heading-up, and the heading is fused: GPS course while moving, else the
+  bearing of the road ahead, else the last few metres of movement.
+- **Sensor-fused position.** A constant-velocity Kalman filter per axis fuses position
+  with the platform's Doppler speed, so the arrow sits still at a red light, keeps up with
+  a car without trailing, and still reports a speed when the browser says `speed: null`.
+- **Live ETA**, off-route detection with automatic rerouting, arrival detection, a "no GPS
+  signal" notice after 20 s without a fix, **waypoints** (stops routed as Valhalla
+  `break` locations, announced as "you have reached stop N"), and **avoid tolls /
+  motorways / ferries** which reach Valhalla as `costing_options` (`use_tolls`,
+  `use_highways`, `use_ferry`), falling back to a plain request if an instance rejects
+  them.
+
 | Need | What we use | Cost |
 |---|---|---|
 | Map rendering | [MapLibre GL JS](https://maplibre.org/) (open source) | free |
@@ -204,7 +228,9 @@ src/
   config.ts          ← ALL external service URLs (change these to self-host)
   App.tsx            ← state + wiring
   components/        ← MapView, Sheet, TopBar, SearchBox, RoutePanel, StepsList, NavOverlay, MapButtons
-  lib/               ← geocode (Nominatim), routing (Valhalla/OSRM), geo math, storage, wake lock
+  lib/               ← geocode (Nominatim), routing (Valhalla/OSRM + waypoints, avoid),
+                       guidance (prompt ladder, zoom, heading, ETA), navmath (Kalman, progress),
+                       geo math, storage, wake lock
   hooks/             ← geolocation, theme
 public/              ← manifest.webmanifest, favicon, PWA icons
 scripts/make_icons.py  ← regenerates the PNG icons (python3 + pillow)

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { APP_VERSION, type MapStyle } from '../config';
-import type { Place, Settings } from '../types';
+import type { Place, RouteAvoid, Settings } from '../types';
 import type { Theme } from '../hooks/useTheme';
 import { speechSupported } from '../lib/voice';
 
@@ -17,6 +17,12 @@ interface SidebarProps {
   onPick: (p: Place) => void;
   onRemoveFav: (id: string) => void;
 }
+
+const AVOID_LABEL: Record<keyof RouteAvoid, string> = {
+  tolls: 'Tolls',
+  highways: 'Motorways',
+  ferries: 'Ferries',
+};
 
 const TABS: Array<{ id: Tab; label: string }> = [
   { id: 'saved', label: 'Saved' },
@@ -122,6 +128,20 @@ export function Sidebar(props: SidebarProps) {
               <span className="set-label">Lite mode</span>
               <Toggle on={settings.perf} onClick={() => set({ perf: !settings.perf })} label="Toggle lite mode" />
             </div>
+            <div className="body-label" style={{ marginTop: 16 }}>Route preferences</div>
+            {(['tolls', 'highways', 'ferries'] as Array<keyof RouteAvoid>).map((k) => (
+              <div className="set-row" key={k}>
+                <span className="set-label">{AVOID_LABEL[k]}</span>
+                <Toggle
+                  on={Boolean(settings.avoid?.[k])}
+                  onClick={() => set({ avoid: { tolls: false, highways: false, ferries: false, ...settings.avoid, [k]: !settings.avoid?.[k] } })}
+                  label={`Avoid ${AVOID_LABEL[k].toLowerCase()}`}
+                />
+              </div>
+            ))}
+            <p className="dim sb-note">
+              Avoided roads only apply to the car route. Each change recalculates the route.
+            </p>
             <p className="dim sb-note">
               Lite mode draws a simpler map and drops the blur. It runs better on older phones.
             </p>
