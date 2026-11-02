@@ -44,3 +44,21 @@ export function maneuverLabel(step: Pick<RouteStep, 'type' | 'modifier'>): strin
   if (t === 'turn') return `turn ${m || 'straight'}`.trim();
   return m ? `${t} ${m}`.trim() : t;
 }
+
+/**
+ * One glyph per lane, the way a lane diagram points: the arrows the driver
+ * will see painted on the tarmac, not words. Valhalla reports them as
+ * "left" / "slight left" / "straight" / "sharp right" / "u_turn" / "merge".
+ */
+export function laneGlyph(direction: string): string {
+  const d = direction.toLowerCase().replace(/[-_]/g, ' ').trim();
+  if (d.includes('uturn') || d.includes('u turn')) return '↺';
+  if (d.includes('sharp') && d.includes('left')) return '↙';
+  if (d.includes('sharp') && d.includes('right')) return '↘';
+  if (d.includes('slight') && d.includes('left')) return '↖';
+  if (d.includes('slight') && d.includes('right')) return '↗';
+  if (d.includes('left')) return '←';
+  if (d.includes('right')) return '→';
+  if (d.includes('merge')) return '↗';
+  return '↑';
+}

@@ -1,5 +1,5 @@
 import type { TravelMode } from '../config';
-import type { Place, RouteResult } from '../types';
+import type { Place, RouteAvoid, RouteResult } from '../types';
 import { formatDistance, formatDuration, formatEta } from '../lib/geo';
 
 interface RoutePanelProps {
@@ -15,6 +15,12 @@ interface RoutePanelProps {
   onRetry: () => void;
   isFav: boolean;
   onToggleFav: () => void;
+  /** roads to steer around — re-routes as soon as one is switched */
+  avoid?: RouteAvoid;
+  onAvoid?: (a: RouteAvoid) => void;
+  /** intermediate stops, shown between "start" and the destination */
+  stops?: Place[];
+  onRemoveStop?: (id: string) => void;
 }
 
 const MODES: Array<{ id: TravelMode; label: string }> = [
@@ -23,8 +29,17 @@ const MODES: Array<{ id: TravelMode; label: string }> = [
   { id: 'bike', label: 'Bike' },
 ];
 
+const AVOID_CHOICES: Array<{ id: keyof RouteAvoid; label: string }> = [
+  { id: 'tolls', label: 'Tolls' },
+  { id: 'highways', label: 'Motorways' },
+  { id: 'ferries', label: 'Ferries' },
+];
+
 export function RoutePanel(props: RoutePanelProps) {
-  const { destination, route, routeStatus, mode, onMode, navigating, onStart, onStop, onClear, onRetry, isFav, onToggleFav } = props;
+  const { destination, route, routeStatus, mode, onMode, navigating, onStart, onStop, onClear, onRetry, isFav, onToggleFav, avoid, onAvoid, stops, onRemoveStop } = props;
+  // the switches only mean something for a vehicle: a walker never pays a toll
+  const canAvoid = mode === 'car';
+  const avoidList = avoid ? AVOID_CHOICES.filter((c) => avoid[c.id]) : [];
   return (
     <div className="route-panel">
       <div className="route-dest">
@@ -35,6 +50,22 @@ export function RoutePanel(props: RoutePanelProps) {
         </button>
         <button className="icon-btn" onClick={onClear} title="Clear" aria-label="Clear destination">×</button>
       </div>
+
+      {stops && stops.length > 0 && (
+        <ul className="stop-list">
+          {stops.map((sp, i) => (
+            <li key={sp.id}>
+              <span className="stop-dot mono" aria-hidden>{i + 1}</span>
+              <span className="stop-name" title={sp.name}>{sp.name}</span>
+              {onRemoveStop && (
+                <button className="icon-btn" onClick={() => onRemoveStop(sp.id)} aria-label={`Remove stop ${sp.name.split(',')[0]}`}>
+                  ×
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
 
       {routeStatus === 'loading' && <div className="dim route-note">Working out the route<span className="dots">…</span></div>}
       {routeStatus === 'error' && (
@@ -58,6 +89,28 @@ export function RoutePanel(props: RoutePanelProps) {
               </button>
             ))}
           </div>
+          {canAvoid && avoid && onAvoid && (
+            <div className="avoid-row" role="group" aria-label="Avoid">
+              <span className="dim avoid-label">Avoid</span>
+              {AVOID_CHOICES.map((c) => (
+                <button
+                  key={c.id}
+                  className={`chip avoid${avoid[c.id] ? ' on' : ''}`}
+                  onClick={() => onAvoid({ ...avoid, [c.id]: !avoid[c.id] })}
+                  aria-pressed={avoid[c.id]}
+                >
+                  {c.label}
+                </button>
+              ))}
+            </div>
+          )}
+          {(route.hasToll || route.hasFerry || (route.hasHighway && avoidList.some((c) => c.id === 'highways'))) && (
+            <div className="route-note dim">
+              {route.hasToll && 'This route has tolls. '}
+              {route.hasFerry && 'It includes a ferry crossing. '}
+              {route.hasHighway && avoidList.some((c) => c.id === 'highways') && 'Motorways could not be avoided everywhere.'}
+            </div>
+          )}
           {navigating ? (
             <button className="btn primary stop" onClick={onStop}>End navigation</button>
           ) : (

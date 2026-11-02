@@ -12,6 +12,12 @@ export interface Place {
   kind?: string;
 }
 
+/** One lane at a junction: which directions it serves, and whether it is the one to be in */
+export interface Lane {
+  directions: string[];
+  active: boolean;
+}
+
 /** One turn-by-turn instruction. `location` is [lon, lat] of the maneuver point. */
 export interface RouteStep {
   instruction: string;
@@ -22,6 +28,25 @@ export interface RouteStep {
   type: string;
   modifier?: string;
   location: [number, number];
+  /**
+   * Router-supplied phrasing. Valhalla generates a separate sentence for each
+   * moment of the approach — that cadence is most of why commercial navigators
+   * sound natural, so we speak these instead of gluing words together.
+   */
+  verbal?: string;
+  /** advance warning, spoken well before the turn ("In 400 meters, turn right…") */
+  verbalAlert?: string;
+  /** what to say right after completing the maneuver */
+  verbalPost?: string;
+  /** true when this maneuver needs the next one announced too (close junctions) */
+  multiCue?: boolean;
+  lanes?: Lane[];
+  /** motorway exit number, e.g. "42" */
+  exitNumber?: string;
+  toll?: boolean;
+  highway?: boolean;
+  /** posted limit in km/h when the router knows it */
+  speedLimit?: number;
 }
 
 export interface RouteResult {
@@ -30,6 +55,17 @@ export interface RouteResult {
   steps: RouteStep[];
   distanceM: number;
   durationS: number;
+  /** summary flags the router reports for the whole trip */
+  hasToll?: boolean;
+  hasHighway?: boolean;
+  hasFerry?: boolean;
+}
+
+/** routing preferences passed to the engine as costing options */
+export interface RouteAvoid {
+  tolls: boolean;
+  highways: boolean;
+  ferries: boolean;
 }
 
 export type GpsStatus = 'locating' | 'ok' | 'denied' | 'error' | 'unsupported';
@@ -44,6 +80,8 @@ export interface Settings {
   faLabels: boolean;
   /** pinned map style ('auto' follows the theme) */
   mapStyle: MapStyle;
+  /** prefer routes without tolls / motorways / ferries */
+  avoid?: RouteAvoid;
 }
 
 export type SheetSnap = 'hidden' | 'peek' | 'full';

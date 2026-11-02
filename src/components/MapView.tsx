@@ -40,6 +40,10 @@ export interface MapViewProps {
   /** while navigating: polyline from the current position to the destination */
   remainingCoords: [number, number][] | null;
   navigating: boolean;
+  /** camera zoom while navigating: speed zone + turn pull-in (lib/guidance) */
+  navZoom?: number;
+  /** camera + arrow heading while navigating (fused in lib/guidance.pickHeading) */
+  navHeading?: number | null;
   follow: boolean;
   /** force the Leaflet raster fallback even when WebGL2 is available */
   forceRaster?: boolean;
@@ -479,7 +483,9 @@ function GlMapView(props: MapViewProps) {
     const prev = lastDotRef.current;
     const moved = prev ? bearingDeg(prev, ll) : null;
     lastDotRef.current = ll;
-    if (hd !== null && Number.isFinite(hd)) marker.setRotation(hd);
+    const fused = props.navHeading;
+    if (fused !== null && fused !== undefined && Number.isFinite(fused)) marker.setRotation(fused);
+    else if (hd !== null && Number.isFinite(hd)) marker.setRotation(hd);
     else if (moved !== null && prev && haversineM(prev, ll) > 3) marker.setRotation(moved);
     if (styleLoadedRef.current && map.isStyleLoaded()) {
       const src = map.getSource('me-accuracy') as maplibregl.GeoJSONSource | undefined;
@@ -493,7 +499,7 @@ function GlMapView(props: MapViewProps) {
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.pos, props.displayPos]);
+  }, [props.pos, props.displayPos, props.navHeading]);
 
   // destination pin
   useEffect(() => {
@@ -513,9 +519,12 @@ function GlMapView(props: MapViewProps) {
   // padding moves the centre point below the middle of the viewport.
   const navCamera = (map: maplibregl.Map, center?: [number, number], bearing?: number) => {
     const h = map.getContainer?.().clientHeight || 0;
+    // the zoom comes from lib/guidance: wide at speed, closer at a junction
+    const wanted = props.navZoom;
+    const zoom = Number.isFinite(wanted) ? Math.max(14, Math.min(19, wanted as number)) : CONFIG.map.navigationZoom;
     return {
       ...(center ? { center } : {}),
-      zoom: Math.max(map.getZoom(), CONFIG.map.navigationZoom),
+      zoom,
       pitch: CONFIG.map.navPitch,
       ...(bearing !== undefined && Number.isFinite(bearing) ? { bearing } : {}),
       padding: { top: Math.round(h * 0.2), right: 0, bottom: 0, left: 0 },
@@ -566,12 +575,17 @@ function GlMapView(props: MapViewProps) {
     lastFollowRef.current = [longitude, latitude];
     // heading can be null or NaN/Infinity on some WebViews — only trust finite values
     const movedBearing = last ? bearingDeg(last, [longitude, latitude]) : null;
+    // the parent fuses GPS course + the road ahead + movement (lib/guidance),
+    // so its heading wins; the rest are fallbacks for the first few fixes
+    const fused = props.navHeading;
     const bearing =
-      heading !== null && Number.isFinite(heading)
-        ? heading
-        : movedBearing !== null && haversineM(last!, [longitude, latitude]) > 3
-          ? movedBearing
-          : map.getBearing();
+      fused !== null && fused !== undefined && Number.isFinite(fused)
+        ? fused
+        : heading !== null && Number.isFinite(heading)
+          ? heading
+          : movedBearing !== null && haversineM(last!, [longitude, latitude]) > 3
+            ? movedBearing
+            : map.getBearing();
     const target = navCamera(map, [longitude, latitude], bearing);
     if (instantRef.current) {
       map.jumpTo(target);
@@ -579,7 +593,7 @@ function GlMapView(props: MapViewProps) {
       map.easeTo({ ...target, duration: 650 });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.pos, props.displayPos, props.navigating, props.follow]);
+  }, [props.pos, props.displayPos, props.navigating, props.follow, props.navZoom, props.navHeading]);
 
   return <div className={`map-container ${props.theme}${props.perf ? ' perf' : ''}`} ref={containerRef} data-testid="map" />;
 }
