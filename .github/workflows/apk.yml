@@ -139,7 +139,7 @@ jobs:
           cp "$APK_PATH" lostless.apk
           ls -la lostless.apk
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: lostless-apk
           path: lostless.apk
